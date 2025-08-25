@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cstddef>
 
 namespace turboinfer {
 namespace model {

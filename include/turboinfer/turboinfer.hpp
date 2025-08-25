@@ -9,6 +9,10 @@
 
 #pragma once
 
+#include <cstddef>
+#include <string>
+#include <vector>
+
 // Core functionality
 #include "core/tensor.hpp"
 #include "core/tensor_engine.hpp"

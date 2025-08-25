@@ -9,6 +9,9 @@
 #include <cstring>
 #include <stdexcept>
 #include <numeric>
+#include <string>
+#include <vector>
+#include <cstddef>
 
 namespace turboinfer {
 namespace core {

@@ -10,6 +10,7 @@
 #include <mutex>
 #include <iomanip>
 #include <chrono>
+#include <ctime>
 
 namespace turboinfer {
 namespace util {

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <memory>
 #include <unordered_map>
+#include <cstddef>
 
 namespace turboinfer {
 namespace util {

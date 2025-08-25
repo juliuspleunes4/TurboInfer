@@ -42,14 +42,22 @@ if(TURBOINFER_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
 
-# Eigen3 for linear algebra
-find_package(Eigen3 REQUIRED)
+# Eigen3 for linear algebra (optional for now)
+find_package(Eigen3 QUIET)
+if(Eigen3_FOUND)
+    message(STATUS "Found Eigen3: ${Eigen3_VERSION}")
+    set(TURBOINFER_HAS_EIGEN3 ON)
+else()
+    message(WARNING "Eigen3 not found - some optimized operations will not be available")
+    set(TURBOINFER_HAS_EIGEN3 OFF)
+endif()
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Core library
 file(GLOB_RECURSE TURBOINFER_SOURCES
+    "src/*.cpp"
     "src/core/*.cpp"
     "src/model/*.cpp"
     "src/optimize/*.cpp"
@@ -70,8 +78,12 @@ target_include_directories(turboinfer PUBLIC
 
 target_link_libraries(turboinfer PUBLIC
     Threads::Threads
-    Eigen3::Eigen
 )
+
+if(TURBOINFER_HAS_EIGEN3)
+    target_link_libraries(turboinfer PUBLIC Eigen3::Eigen)
+    target_compile_definitions(turboinfer PUBLIC TURBOINFER_HAS_EIGEN3)
+endif()
 
 if(TURBOINFER_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
     target_link_libraries(turboinfer PUBLIC OpenMP::OpenMP_CXX)

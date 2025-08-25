@@ -9,6 +9,9 @@
 #include "../core/tensor.hpp"
 #include "../model/model_loader.hpp"
 #include <memory>
+#include <vector>
+#include <string>
+#include <cstddef>
 
 namespace turboinfer {
 namespace optimize {

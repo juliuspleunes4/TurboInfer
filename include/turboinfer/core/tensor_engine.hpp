@@ -9,6 +9,8 @@
 #include "tensor.hpp"
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstddef>
 
 namespace turboinfer {
 namespace core {

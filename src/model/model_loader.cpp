@@ -7,6 +7,9 @@
 #include "turboinfer/model/model_loader.hpp"
 #include <stdexcept>
 #include <filesystem>
+#include <vector>
+#include <string>
+#include <cstddef>
 
 namespace turboinfer {
 namespace model {
@@ -24,7 +27,7 @@ core::Tensor* ModelData::get_tensor(const std::string& name) {
 }
 
 void ModelData::add_tensor(const std::string& name, core::Tensor tensor) {
-    tensors_[name] = std::move(tensor);
+    tensors_.insert_or_assign(name, std::move(tensor));
 }
 
 std::vector<std::string> ModelData::tensor_names() const {
