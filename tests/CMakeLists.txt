@@ -17,10 +17,18 @@ endif()
 
 # Test sources
 set(TEST_SOURCES
+    test_main.cpp
     test_tensor.cpp
     test_tensor_engine.cpp
     test_model_loader.cpp
-    test_main.cpp
+    test_logging.cpp
+    test_library_init.cpp
+    test_data_types.cpp
+    test_memory.cpp
+    test_tensor_ops.cpp
+    test_error_handling.cpp
+    test_performance.cpp
+    test_quantization.cpp
 )
 
 # Create test executable
