@@ -1,5 +1,7 @@
 #include "turboinfer/turboinfer.hpp"
 #include <iostream>
+#include <cstddef>
+#include <vector>
 
 int main() {
     // Initialize the library
@@ -20,8 +22,13 @@ int main() {
     std::cout << "Memory usage: " << tensor.byte_size() << " bytes" << std::endl;
     
     // Perform tensor operations
-    auto slice_start = std::vector<size_t>{0, 0};
-    auto slice_end = std::vector<size_t>{1, 2};
+    std::vector<std::size_t> slice_start;
+    slice_start.push_back(0);
+    slice_start.push_back(0);
+    
+    std::vector<std::size_t> slice_end;
+    slice_end.push_back(1);
+    slice_end.push_back(2);
     auto sliced = tensor.slice(slice_start, slice_end);
     
     std::cout << "Sliced tensor has " << sliced.shape().ndim() << " dimensions" << std::endl;
