@@ -1,7 +1,7 @@
 /**
  * @file quantization.cpp
  * @brief Implementation of quantization utilities (placeholder).
- * @author TurboInfer Contributors
+ * @author J.J.G. Pleunes
  */
 
 #include "turboinfer/optimize/quantization.hpp"

@@ -97,7 +97,7 @@ Exceptional documentation is critical for an open-source project. Every file, cl
     /**
      * @file tensor_engine.hpp
      * @brief Defines the TensorEngine class for managing tensor operations in TurboInfer.
-     * @author [Your Name]
+     * @author J.J.G. Pleunes
      */
     ```
 - **Class Comments**:
