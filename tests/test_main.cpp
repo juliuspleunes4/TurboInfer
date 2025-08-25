@@ -1,7 +1,7 @@
 /**
  * @file test_main.cpp
  * @brief Main entry point for TurboInfer unit tests.
- * @author TurboInfer Contributors
+ * @author J.J.G. Pleunes
  */
 
 #include <gtest/gtest.h>

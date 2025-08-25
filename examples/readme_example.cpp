@@ -1,3 +1,9 @@
+/**
+ * @file readme_example.cpp
+ * @brief Example program demonstrating basic TurboInfer usage.
+ * @author J.J.G. Pleunes
+ */
+
 #include "turboinfer/turboinfer.hpp"
 #include <iostream>
 #include <cstddef>

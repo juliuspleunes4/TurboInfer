@@ -1,7 +1,7 @@
 /**
  * @file profiler.cpp
  * @brief Implementation of performance profiling utilities (placeholder).
- * @author TurboInfer Contributors
+ * @author J.J.G. Pleunes
  */
 
 #include "turboinfer/util/profiler.hpp"
