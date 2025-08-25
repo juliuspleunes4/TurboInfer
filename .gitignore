@@ -11,6 +11,13 @@ cmake-build-*/
 *.swo
 *~
 
+# Temporary and test files
+test_*.cpp
+test_*.exe
+test_*.obj
+temp_*
+*.tmp
+
 # Compiled Object files
 *.slo
 *.lo

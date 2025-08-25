@@ -32,13 +32,27 @@
 
 ## 🛠️ Building from Source
 
+### Quick Development (Recommended)
+```powershell
+# Windows with PowerShell
+.\scripts\dev.ps1 build    # Build the project
+.\scripts\dev.ps1 test     # Run tests
+.\scripts\dev.ps1 clean    # Clean build artifacts
+```
+
+```bash
+# Linux/macOS
+./scripts/build.sh         # Build the project
+python3 tools/test_library.py  # Test the library
+```
+
 ### Clone the Repository
 ```bash
 git clone https://github.com/username/TurboInfer.git
 cd TurboInfer
 ```
 
-### Build with CMake
+### Manual Build with CMake
 ```bash
 # Create build directory
 mkdir build && cd build
