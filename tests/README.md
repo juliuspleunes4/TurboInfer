@@ -124,26 +124,30 @@ This document describes the comprehensive test suite for TurboInfer, covering al
 
 ### Running Individual Tests
 ```powershell
-# Specific test patterns
-build/tests/turboinfer_tests.exe --gtest_filter="TensorTest*"
-build/tests/turboinfer_tests.exe --gtest_filter="*Memory*"
-build/tests/turboinfer_tests.exe --gtest_filter="PerformanceTest.Tensor_Creation_Performance"
+# Run specific test executables
+.\build\test_tensor.exe
+.\build\test_memory.exe
+.\build\test_library_init.exe
+
+# Or via scripts (Windows)
+.\scripts\run_tests.bat
 ```
 
 ## Test Configuration
 
 ### Build Requirements
-- **GoogleTest**: Downloaded automatically via CMake FetchContent
+- **Manual Testing Framework**: Self-contained using C++20 standard library
 - **C++20 Compiler**: GCC 10+, Clang 12+, or MSVC 2019+
 - **CMake 3.20+**: For build system
 
 ### Environment Setup
 ```powershell
-# Build tests
-cmake --build build --target turboinfer_tests
+# Build all tests
+cmake --build build
 
 # Build specific test
-cmake --build build --target tensor_test
+cmake --build build --target test_tensor
+cmake --build build --target test_memory
 ```
 
 ## Test Data and Fixtures
