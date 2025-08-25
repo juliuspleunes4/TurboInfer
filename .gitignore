@@ -1,0 +1,149 @@
+# Build directories
+build/
+builds/
+out/
+cmake-build-*/
+
+# IDE files
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Testing
+Testing/
+CTestTestfile.cmake
+DartConfiguration.tcl
+
+# CPack
+_CPack_Packages/
+*.dmg
+*.gz
+*.sh
+*.zip
+
+# Conan
+conanfile.txt
+conaninfo.txt
+conanbuildinfo.cmake
+conan.lock
+
+# vcpkg
+vcpkg_installed/
+
+# Model files (usually large)
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+models/
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Documentation build
+docs/_build/
+docs/html/
+docs/latex/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!cmake/*.cmake
+!cmake/*.cmake.in
+
+# Package files
+*.deb
+*.rpm
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Backup files
+*.bak
+*.backup
