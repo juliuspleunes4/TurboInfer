@@ -4,108 +4,194 @@
  * @author J.J.G. Pleunes
  */
 
-#include <gtest/gtest.h>
 #include "turboinfer/turboinfer.hpp"
+#include <iostream>
+#include <cassert>
 #include <string>
 
-class LibraryInitTest : public ::testing::Test {
-protected:
-    void SetUp() override {
-        // Ensure clean state before each test
-        if (turboinfer::is_initialized()) {
-            turboinfer::shutdown();
-        }
-    }
+// Test result tracking
+int tests_run = 0;
+int tests_passed = 0;
 
-    void TearDown() override {
-        // Clean up after each test
-        if (turboinfer::is_initialized()) {
-            turboinfer::shutdown();
-        }
-    }
-};
+#define ASSERT_TRUE(condition) \
+    do { \
+        tests_run++; \
+        if (condition) { \
+            tests_passed++; \
+            std::cout << "✅ PASS: " << #condition << std::endl; \
+        } else { \
+            std::cout << "❌ FAIL: " << #condition << std::endl; \
+        } \
+    } while(0)
 
-TEST_F(LibraryInitTest, Basic_Initialize_Shutdown) {
+#define ASSERT_FALSE(condition) ASSERT_TRUE(!(condition))
+#define ASSERT_NO_THROW(statement) \
+    do { \
+        tests_run++; \
+        try { \
+            statement; \
+            tests_passed++; \
+            std::cout << "✅ PASS: " << #statement << " (no exception)" << std::endl; \
+        } catch (...) { \
+            std::cout << "❌ FAIL: " << #statement << " (unexpected exception)" << std::endl; \
+        } \
+    } while(0)
+
+void setup_test() {
+    // Ensure clean state before each test
+    if (turboinfer::is_initialized()) {
+        turboinfer::shutdown();
+    }
+}
+
+void teardown_test() {
+    // Clean up after each test
+    if (turboinfer::is_initialized()) {
+        turboinfer::shutdown();
+    }
+}
+
+void test_basic_initialize_shutdown() {
+    std::cout << "\n--- Test: Basic Initialize Shutdown ---" << std::endl;
+    setup_test();
+    
     // Test basic initialization
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
     
     bool result = turboinfer::initialize(false); // No verbose logging
-    EXPECT_TRUE(result);
-    EXPECT_TRUE(turboinfer::is_initialized());
+    ASSERT_TRUE(result);
+    ASSERT_TRUE(turboinfer::is_initialized());
     
     // Test shutdown
     turboinfer::shutdown();
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Initialize_With_Verbose_Logging) {
-    EXPECT_FALSE(turboinfer::is_initialized());
+void test_initialize_with_verbose_logging() {
+    std::cout << "\n--- Test: Initialize With Verbose Logging ---" << std::endl;
+    setup_test();
+    
+    ASSERT_FALSE(turboinfer::is_initialized());
     
     bool result = turboinfer::initialize(true); // Verbose logging
-    EXPECT_TRUE(result);
-    EXPECT_TRUE(turboinfer::is_initialized());
+    ASSERT_TRUE(result);
+    ASSERT_TRUE(turboinfer::is_initialized());
     
     turboinfer::shutdown();
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Multiple_Initialize_Calls) {
+void test_multiple_initialize_calls() {
+    std::cout << "\n--- Test: Multiple Initialize Calls ---" << std::endl;
+    setup_test();
+    
     // First initialization should succeed
-    EXPECT_TRUE(turboinfer::initialize(false));
-    EXPECT_TRUE(turboinfer::is_initialized());
+    ASSERT_TRUE(turboinfer::initialize(false));
+    ASSERT_TRUE(turboinfer::is_initialized());
     
     // Second initialization should handle gracefully
-    EXPECT_TRUE(turboinfer::initialize(false));
-    EXPECT_TRUE(turboinfer::is_initialized());
+    ASSERT_TRUE(turboinfer::initialize(false));
+    ASSERT_TRUE(turboinfer::is_initialized());
     
     turboinfer::shutdown();
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Shutdown_Without_Initialize) {
+void test_shutdown_without_initialize() {
+    std::cout << "\n--- Test: Shutdown Without Initialize ---" << std::endl;
+    setup_test();
+    
     // Should handle shutdown when not initialized
-    EXPECT_FALSE(turboinfer::is_initialized());
-    EXPECT_NO_THROW(turboinfer::shutdown());
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    ASSERT_NO_THROW(turboinfer::shutdown());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Multiple_Shutdown_Calls) {
+void test_multiple_shutdown_calls() {
+    std::cout << "\n--- Test: Multiple Shutdown Calls ---" << std::endl;
+    setup_test();
+    
     // Initialize first
-    EXPECT_TRUE(turboinfer::initialize(false));
-    EXPECT_TRUE(turboinfer::is_initialized());
+    ASSERT_TRUE(turboinfer::initialize(false));
+    ASSERT_TRUE(turboinfer::is_initialized());
     
     // First shutdown
     turboinfer::shutdown();
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_FALSE(turboinfer::is_initialized());
     
     // Second shutdown should handle gracefully
-    EXPECT_NO_THROW(turboinfer::shutdown());
-    EXPECT_FALSE(turboinfer::is_initialized());
+    ASSERT_NO_THROW(turboinfer::shutdown());
+    ASSERT_FALSE(turboinfer::is_initialized());
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Version_Info) {
+void test_version_info() {
+    std::cout << "\n--- Test: Version Info ---" << std::endl;
+    setup_test();
+    
     // Test version and build info
     std::string version = turboinfer::version();
-    EXPECT_FALSE(version.empty());
-    EXPECT_NE(version.find("1.0.0"), std::string::npos);
+    ASSERT_FALSE(version.empty());
+    ASSERT_TRUE(version.find("1.0.0") != std::string::npos);
     
     std::string build_info = turboinfer::build_info();
-    EXPECT_FALSE(build_info.empty());
-    EXPECT_NE(build_info.find("TurboInfer"), std::string::npos);
-    EXPECT_NE(build_info.find("C++"), std::string::npos);
+    ASSERT_FALSE(build_info.empty());
+    ASSERT_TRUE(build_info.find("TurboInfer") != std::string::npos);
+    ASSERT_TRUE(build_info.find("C++") != std::string::npos);
+    
+    teardown_test();
 }
 
-TEST_F(LibraryInitTest, Initialize_Shutdown_Cycle) {
+void test_initialize_shutdown_cycle() {
+    std::cout << "\n--- Test: Initialize Shutdown Cycle ---" << std::endl;
+    setup_test();
+    
     // Test multiple init/shutdown cycles
     for (int i = 0; i < 5; ++i) {
-        EXPECT_TRUE(turboinfer::initialize(false));
-        EXPECT_TRUE(turboinfer::is_initialized());
+        ASSERT_TRUE(turboinfer::initialize(false));
+        ASSERT_TRUE(turboinfer::is_initialized());
         
         // Test that functions work during initialized state
         std::string version = turboinfer::version();
-        EXPECT_FALSE(version.empty());
+        ASSERT_FALSE(version.empty());
         
         turboinfer::shutdown();
-        EXPECT_FALSE(turboinfer::is_initialized());
+        ASSERT_FALSE(turboinfer::is_initialized());
+    }
+    
+    teardown_test();
+}
+
+int main() {
+    std::cout << "🚀 Starting TurboInfer Library Initialization Tests..." << std::endl;
+    
+    test_basic_initialize_shutdown();
+    test_initialize_with_verbose_logging();
+    test_multiple_initialize_calls();
+    test_shutdown_without_initialize();
+    test_multiple_shutdown_calls();
+    test_version_info();
+    test_initialize_shutdown_cycle();
+    
+    std::cout << "\n📊 Test Results:" << std::endl;
+    std::cout << "Tests run: " << tests_run << std::endl;
+    std::cout << "Tests passed: " << tests_passed << std::endl;
+    std::cout << "Tests failed: " << (tests_run - tests_passed) << std::endl;
+    
+    if (tests_passed == tests_run) {
+        std::cout << "🎉 ALL TESTS PASSED!" << std::endl;
+        return 0;
+    } else {
+        std::cout << "❌ SOME TESTS FAILED!" << std::endl;
+        return 1;
     }
 }
