@@ -288,12 +288,38 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🗓️ Roadmap
 
-- [x] Core tensor operations and inference engine
-- [x] GGUF model format support
-- [x] 4-bit and 8-bit quantization
-- [ ] GPU acceleration (CUDA/ROCm)
+### Phase 1: Foundation Infrastructure ✅ **COMPLETE**
+- [x] Core tensor system with multi-dimensional arrays
+- [x] Memory management with RAII patterns
+- [x] Cross-platform build system (CMake)
+- [x] Logging framework with configurable output
+- [x] Development scripts and tooling
+- [x] Unit testing framework integration
+
+### Phase 2: Mathematical Operations 🚧 **IN PROGRESS**
+- [ ] Basic linear algebra (GEMM, matrix operations)
+- [ ] Attention mechanisms (self-attention, multi-head)
+- [ ] Activation functions (ReLU, GELU, SiLU)
+- [ ] Layer normalization and embeddings
+- [ ] SIMD optimizations (AVX, NEON)
+
+### Phase 3: Model Loading and Parsing 📋 **PLANNED**
+- [ ] GGUF format parser and loader
+- [ ] SafeTensors format support
+- [ ] PyTorch model conversion utilities
+- [ ] ONNX model support
+- [ ] Model metadata and configuration handling
+
+### Phase 4: Inference Engine 📋 **PLANNED**
+- [ ] Transformer decoder implementation
+- [ ] Token generation and sampling
+- [ ] KV-cache management
+- [ ] Temperature and top-k/top-p sampling
+- [ ] Beam search implementation
 
 ### Phase 5: Production Features 📋 **FUTURE**
+- [ ] Quantization algorithms (INT4/INT8)
+- [ ] GPU acceleration (CUDA/ROCm)
 - [ ] Batched inference support
 - [ ] Streaming text generation
 - [ ] Python bindings
