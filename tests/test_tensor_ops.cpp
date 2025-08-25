@@ -1,5 +1,5 @@
 ﻿/**
- * @file test_tensor.cpp
+ * @file test_tensor_ops.cpp
  * @brief Manual unit tests converted from GoogleTest.
  * @author J.J.G. Pleunes
  */
@@ -79,7 +79,7 @@ void test_placeholder() {
 }
 
 int main() {
-    std::cout << "ðŸš€ Starting test_tensor Tests..." << std::endl;
+    std::cout << "ðŸš€ Starting test_tensor_ops Tests..." << std::endl;
     
     test_placeholder();
     

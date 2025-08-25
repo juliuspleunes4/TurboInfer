@@ -25,7 +25,8 @@
 - Build system with CMake and cross-platform scripts
 - Logging framework with configurable output
 - Comprehensive API design for model loading and inference
-- Unit testing framework integration
+- Manual testing framework with comprehensive coverage
+- Library initialization and lifecycle management
 
 ### 🚧 **In Development:**
 - Mathematical operations (GEMM, convolutions, attention)
@@ -45,7 +46,8 @@
 - **C++ Standard Library**: C++20 compatible implementation
 - **Eigen3**: Linear algebra operations (optional, for optimized math)
 - **OpenMP**: Parallel processing (optional, enabled by default)
-- **GoogleTest**: Unit testing framework (optional, for development)
+
+*Note: TurboInfer uses a self-contained manual testing approach with no external test dependencies.*
 
 ## 🛠️ Building from Source
 
@@ -184,34 +186,62 @@ TurboInfer/
 │   ├── model/          # Model loading/inference
 │   ├── optimize/       # Quantization utilities
 │   └── util/           # Logging and profiling
-├── 📁 scripts/         # Build and development scripts
+├── 📁 scripts/         # Build and testing scripts
+│   ├── run_tests.bat   # Run all tests
+│   └── build.bat       # Build project
 ├── 📁 tools/           # Development utilities
-├── 📁 tests/           # Unit tests
+├── 📁 tests/           # Unit tests (manual testing)
 ├── 📁 docs/            # Documentation
 └── 📁 examples/        # Example applications
 ```
 
 ## 🧪 Testing
 
-### Running Tests
+### Running All Tests
+```batch
+# Run all available tests (Windows)
+.\scripts\run_tests.bat
+```
+
 ```powershell
-# Quick test using development script
-.\scripts\dev.ps1 test
-
-# Or manual test
-python tools/test_library.py
+# Individual test execution
+.\build\bin\test_library_init.exe   # Core library functionality
+.\build\bin\test_tensor.exe         # Tensor operations
+.\build\bin\test_memory.exe         # Memory management
+.\build\bin\test_error_handling.exe # Error handling
 ```
 
-### Test Output
+### Available Test Suites
+- **test_library_init**: Library initialization and shutdown (46 tests)
+- **test_tensor**: Tensor creation and operations 
+- **test_memory**: Memory management and RAII patterns
+- **test_error_handling**: Exception handling and error cases
+- **test_performance**: Performance benchmarks (when built)
+- **test_logging**: Logging system functionality (when built)
+
+### Test Output Example
 ```
-=== TurboInfer Quick Test ===
-Build Info: TurboInfer 1.0.0 (built Aug 25 2025) C++202002 +OpenMP Windows
-* Created tensor with 2 dimensions  
-* Total elements: 6
-* Memory usage: 24 bytes
-* Tensor slicing works
-* All tests passed!
+=====================================
+  TurboInfer Test Runner
+=====================================
+
+[1/4] Running test_library_init...
+🚀 Starting TurboInfer Library Initialization Tests...
+✅ PASS: Basic Initialize Shutdown
+✅ PASS: Version Info  
+📊 Test Results: 46/46 tests passed
+
+=====================================
+  TEST SUMMARY
+=====================================
+Total tests: 4
+Passed: 4
+Failed: 0
+All tests PASSED! ✅
 ```
+
+### Manual Testing Approach
+TurboInfer uses a self-contained testing system with no external dependencies. Each test is a standalone executable that provides detailed output and clear pass/fail reporting.
 
 ## 🎯 Current Capabilities
 
@@ -246,8 +276,8 @@ We welcome contributions from the community! TurboInfer is designed to be a coll
 
 ### How to Contribute
 1. **Fork the repository** and create a feature branch
-2. **Build the project** using `.\scripts\dev.ps1 build`
-3. **Run tests** to ensure everything works: `.\scripts\dev.ps1 test`
+2. **Build the project** using CMake or `.\scripts\build.bat`
+3. **Run tests** to ensure everything works: `.\scripts\run_tests.bat`
 4. **Make your changes** following the existing code style
 5. **Add tests** for new functionality
 6. **Submit a pull request** with a clear description
@@ -258,9 +288,12 @@ We welcome contributions from the community! TurboInfer is designed to be a coll
 git clone https://github.com/juliuspleunes4/TurboInfer.git
 cd TurboInfer
 
-# Build and test
-.\scripts\dev.ps1 build
-.\scripts\dev.ps1 test
+# Build the project
+cmake -B build -S . -G "MinGW Makefiles"
+cmake --build build
+
+# Run tests
+.\scripts\run_tests.bat
 ```
 
 ### Code Style
@@ -294,7 +327,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] Cross-platform build system (CMake)
 - [x] Logging framework with configurable output
 - [x] Development scripts and tooling
-- [x] Unit testing framework integration
+- [x] Manual testing framework with comprehensive coverage
+- [x] Library initialization and lifecycle management
 
 ### Phase 2: Mathematical Operations 🚧 **IN PROGRESS**
 - [ ] Basic linear algebra (GEMM, matrix operations)

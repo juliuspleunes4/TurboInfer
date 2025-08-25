@@ -11,10 +11,7 @@ cmake-build-*/
 *.swo
 *~
 
-# Temporary and test files
-test_*.cpp
-test_*.exe
-test_*.obj
+# Temporary files (excluding test source files)
 temp_*
 *.tmp
 
@@ -43,10 +40,14 @@ temp_*
 *.a
 *.lib
 
-# Executables
+# Executables (but allow tracking test source files)
 *.exe
 *.out
 *.app
+
+# Exception: Allow test source files in tests/ directory
+!tests/test_*.cpp
+!tests/**/*.cpp
 
 # Python
 __pycache__/
