@@ -5,15 +5,7 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#building-from-source)
 
 <p align="left">
-  <img src### Phase 3: Model Loading and Parsing 🚧 **IN PROGRESS**
-- [x] GGUF format parser and loader (header parsing, metadata reading, tensor data loading)
-- [x] Model format detection and validation
-- [x] Tensor type conversion from GGUF to TurboInfer format
-- [x] Binary file reading with proper error handling
-- [ ] Model metadata and configuration handling
-- [ ] SafeTensors format support
-- [ ] PyTorch model conversion utilities
-- [ ] ONNX model support//cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/bash/bash-original.svg" alt="Batchfile" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/powershell/powershell-original.svg" alt="Powershell" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cmake/cmake-original.svg" alt="CMake" width="32" height="32"/>

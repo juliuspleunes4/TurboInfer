@@ -165,6 +165,14 @@ public:
      */
     static ModelMetadata get_model_info(const std::string& file_path);
 
+    /**
+     * @brief Validates that a loaded model is complete and consistent.
+     * @param model_data The loaded model data to validate.
+     * @param metadata Expected model metadata for validation.
+     * @return True if model is valid, false otherwise.
+     */
+    static bool validate_model(const ModelData& model_data, const ModelMetadata& metadata);
+
 private:
     /**
      * @brief Loads a GGUF format model.
