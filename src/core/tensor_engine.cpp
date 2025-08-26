@@ -362,11 +362,206 @@ Tensor TensorEngine::softmax(const Tensor& input, float temperature) {
 }
 
 Tensor TensorEngine::attention(const Tensor& query, const Tensor& key, const Tensor& value, const Tensor* mask) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (query.empty() || key.empty() || value.empty()) {
+        throw std::runtime_error("Cannot compute attention with empty tensors");
+    }
+    
+    const std::vector<size_t>& q_dims = query.shape().dimensions();
+    const std::vector<size_t>& k_dims = key.shape().dimensions();
+    const std::vector<size_t>& v_dims = value.shape().dimensions();
+    
+    // Expect tensors with shape [batch_size, seq_len, hidden_size] or [seq_len, hidden_size]
+    if (q_dims.size() < 2 || k_dims.size() < 2 || v_dims.size() < 2) {
+        throw std::runtime_error("Query, key, and value tensors must have at least 2 dimensions");
+    }
+    
+    // Check dimension compatibility
+    size_t q_hidden = q_dims.back();
+    size_t k_hidden = k_dims.back();
+    size_t v_hidden = v_dims.back();
+    size_t k_seq_len = k_dims[k_dims.size() - 2];
+    size_t v_seq_len = v_dims[v_dims.size() - 2];
+    
+    if (q_hidden != k_hidden) {
+        throw std::runtime_error("Query and key must have the same hidden dimension");
+    }
+    if (k_seq_len != v_seq_len) {
+        throw std::runtime_error("Key and value must have the same sequence length");
+    }
+    
+    if (query.dtype() != DataType::kFloat32) {
+        throw std::runtime_error("Attention currently only supports Float32 data type");
+    }
+    
+    // For now, assume 3D tensors [batch, seq_len, hidden] and transpose last two dims manually
+    // This is a simplified implementation - full transpose will be in Phase 4
+    if (k_dims.size() != 3 || q_dims.size() != 3) {
+        throw std::runtime_error("Current attention implementation requires 3D tensors [batch, seq_len, hidden]");
+    }
+    
+    size_t batch_size = k_dims[0];
+    size_t k_seq = k_dims[1];
+    size_t k_dim = k_dims[2];  // Renamed to avoid conflict
+    
+    // Create transposed key tensor [batch, hidden, seq_len]
+    std::vector<size_t> transposed_shape = {batch_size, k_dim, k_seq};
+    Tensor key_transposed(TensorShape(transposed_shape), key.dtype());
+    
+    if (key.dtype() == DataType::kFloat32) {
+        const float* k_data = key.data_ptr<float>();
+        float* kt_data = key_transposed.data_ptr<float>();
+        
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t s = 0; s < k_seq; ++s) {
+                for (size_t h = 0; h < k_dim; ++h) {
+                    size_t src_idx = b * k_seq * k_dim + s * k_dim + h;
+                    size_t dst_idx = b * k_dim * k_seq + h * k_seq + s;
+                    kt_data[dst_idx] = k_data[src_idx];
+                }
+            }
+        }
+    }
+    
+    // Compute attention scores: Q @ K^T
+    Tensor scores = batch_matmul(query, key_transposed);
+    
+    // Scale by sqrt(d_k)
+    float scale_factor = 1.0f / std::sqrt(static_cast<float>(q_hidden));
+    Tensor scaled_scores = scale(scores, scale_factor);
+    
+    // Apply mask if provided (add large negative value to masked positions)
+    if (mask != nullptr) {
+        // Simple masking: add -1e9 to positions where mask is 0
+        const std::vector<size_t>& mask_dims = mask->shape().dimensions();
+        if (mask_dims != scaled_scores.shape().dimensions()) {
+            throw std::runtime_error("Mask dimensions must match attention scores");
+        }
+        
+        if (mask->dtype() == DataType::kFloat32) {
+            const float* mask_data = mask->data_ptr<float>();
+            float* scores_data = scaled_scores.data_ptr<float>();
+            size_t total_elements = scaled_scores.shape().total_size();
+            
+            for (size_t i = 0; i < total_elements; ++i) {
+                if (mask_data[i] == 0.0f) {
+                    scores_data[i] += -1e9f;  // Large negative value
+                }
+            }
+        }
+    }
+    
+    // Apply softmax to get attention weights
+    Tensor attention_weights = softmax(scaled_scores, 1.0f);
+    
+    // Apply attention weights to values: Attention @ V
+    Tensor result = batch_matmul(attention_weights, value);
+    
+    return result;
 }
 
 Tensor TensorEngine::multi_head_attention(const Tensor& query, const Tensor& key, const Tensor& value, size_t num_heads, const Tensor* mask) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (query.empty() || key.empty() || value.empty()) {
+        throw std::runtime_error("Cannot compute multi-head attention with empty tensors");
+    }
+    
+    const std::vector<size_t>& q_dims = query.shape().dimensions();
+    const std::vector<size_t>& k_dims = key.shape().dimensions();
+    const std::vector<size_t>& v_dims = value.shape().dimensions();
+    
+    // Expect 3D tensors [batch_size, seq_len, hidden_size]
+    if (q_dims.size() != 3 || k_dims.size() != 3 || v_dims.size() != 3) {
+        throw std::runtime_error("Multi-head attention requires 3D tensors [batch, seq_len, hidden]");
+    }
+    
+    size_t batch_size = q_dims[0];
+    size_t q_seq_len = q_dims[1];
+    size_t hidden_size = q_dims[2];
+    
+    // Check that hidden_size is divisible by num_heads
+    if (hidden_size % num_heads != 0) {
+        throw std::runtime_error("Hidden size must be divisible by number of heads");
+    }
+    
+    size_t head_dim = hidden_size / num_heads;
+    
+    if (query.dtype() != DataType::kFloat32) {
+        throw std::runtime_error("Multi-head attention currently only supports Float32 data type");
+    }
+    
+    // Split into multiple heads and compute attention for each head
+    std::vector<Tensor> head_outputs;
+    head_outputs.reserve(num_heads);
+    
+    for (size_t head = 0; head < num_heads; ++head) {
+        // Extract head slice from query, key, value
+        size_t start_idx = head * head_dim;
+        size_t end_idx = start_idx + head_dim;
+        
+        // Create head-specific tensors by slicing the hidden dimension
+        std::vector<size_t> head_shape = {batch_size, q_seq_len, head_dim};
+        Tensor q_head(TensorShape(head_shape), query.dtype());
+        Tensor k_head(TensorShape({batch_size, k_dims[1], head_dim}), key.dtype());
+        Tensor v_head(TensorShape({batch_size, v_dims[1], head_dim}), value.dtype());
+        
+        // Copy head data
+        const float* q_data = query.data_ptr<float>();
+        const float* k_data = key.data_ptr<float>();
+        const float* v_data = value.data_ptr<float>();
+        float* qh_data = q_head.data_ptr<float>();
+        float* kh_data = k_head.data_ptr<float>();
+        float* vh_data = v_head.data_ptr<float>();
+        
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t s = 0; s < q_seq_len; ++s) {
+                for (size_t h = 0; h < head_dim; ++h) {
+                    size_t src_q_idx = b * q_seq_len * hidden_size + s * hidden_size + start_idx + h;
+                    size_t dst_idx = b * q_seq_len * head_dim + s * head_dim + h;
+                    qh_data[dst_idx] = q_data[src_q_idx];
+                }
+            }
+            
+            for (size_t s = 0; s < k_dims[1]; ++s) {
+                for (size_t h = 0; h < head_dim; ++h) {
+                    size_t src_k_idx = b * k_dims[1] * hidden_size + s * hidden_size + start_idx + h;
+                    size_t dst_idx = b * k_dims[1] * head_dim + s * head_dim + h;
+                    kh_data[dst_idx] = k_data[src_k_idx];
+                }
+            }
+            
+            for (size_t s = 0; s < v_dims[1]; ++s) {
+                for (size_t h = 0; h < head_dim; ++h) {
+                    size_t src_v_idx = b * v_dims[1] * hidden_size + s * hidden_size + start_idx + h;
+                    size_t dst_idx = b * v_dims[1] * head_dim + s * head_dim + h;
+                    vh_data[dst_idx] = v_data[src_v_idx];
+                }
+            }
+        }
+        
+        // Compute attention for this head
+        Tensor head_output = attention(q_head, k_head, v_head, mask);
+        head_outputs.push_back(std::move(head_output));
+    }
+    
+    // Concatenate all head outputs along the hidden dimension
+    Tensor result(TensorShape({batch_size, q_seq_len, hidden_size}), query.dtype());
+    float* result_data = result.data_ptr<float>();
+    
+    for (size_t head = 0; head < num_heads; ++head) {
+        const float* head_data = head_outputs[head].data_ptr<float>();
+        size_t start_idx = head * head_dim;
+        
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t s = 0; s < q_seq_len; ++s) {
+                for (size_t h = 0; h < head_dim; ++h) {
+                    size_t src_idx = b * q_seq_len * head_dim + s * head_dim + h;
+                    size_t dst_idx = b * q_seq_len * hidden_size + s * hidden_size + start_idx + h;
+                    result_data[dst_idx] = head_data[src_idx];
+                }
+            }
+        }
+    }
+    
+    return result;
 }
 
 Tensor TensorEngine::layer_norm(const Tensor& input, const Tensor& weight, const Tensor& bias, float eps) {
@@ -483,7 +678,119 @@ Tensor TensorEngine::rms_norm(const Tensor& input, const Tensor& weight, float e
 }
 
 Tensor TensorEngine::apply_rope(const Tensor& input, const Tensor& position_ids, float rope_theta) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (input.empty() || position_ids.empty()) {
+        throw std::runtime_error("Cannot apply RoPE to empty tensors");
+    }
+    
+    const std::vector<size_t>& input_dims = input.shape().dimensions();
+    const std::vector<size_t>& pos_dims = position_ids.shape().dimensions();
+    
+    // Input should be [batch, seq_len, hidden] or [batch, num_heads, seq_len, head_dim]
+    if (input_dims.size() < 3) {
+        throw std::runtime_error("RoPE requires input tensor with at least 3 dimensions");
+    }
+    
+    // Position IDs should be [batch, seq_len] or [seq_len]
+    if (pos_dims.size() < 1 || pos_dims.size() > 2) {
+        throw std::runtime_error("Position IDs must be 1D or 2D tensor");
+    }
+    
+    if (input.dtype() != DataType::kFloat32 || position_ids.dtype() != DataType::kFloat32) {
+        throw std::runtime_error("RoPE currently only supports Float32 data type");
+    }
+    
+    // Create result tensor with same shape as input
+    Tensor result(input.shape(), input.dtype());
+    
+    const float* input_data = input.data_ptr<float>();
+    const float* pos_data = position_ids.data_ptr<float>();
+    float* result_data = result.data_ptr<float>();
+    
+    size_t batch_size = input_dims[0];
+    size_t seq_len, hidden_dim;
+    
+    // Handle both 3D [batch, seq, hidden] and 4D [batch, heads, seq, head_dim] cases
+    if (input_dims.size() == 3) {
+        seq_len = input_dims[1];
+        hidden_dim = input_dims[2];
+    } else if (input_dims.size() == 4) {
+        seq_len = input_dims[2];
+        hidden_dim = input_dims[3];
+    } else {
+        throw std::runtime_error("RoPE supports 3D or 4D input tensors only");
+    }
+    
+    // Hidden dimension must be even for RoPE (pairs of dimensions are rotated)
+    if (hidden_dim % 2 != 0) {
+        throw std::runtime_error("Hidden dimension must be even for RoPE");
+    }
+    
+    // Pre-compute frequency components
+    std::vector<float> freqs;
+    freqs.reserve(hidden_dim / 2);
+    
+    for (size_t i = 0; i < hidden_dim / 2; ++i) {
+        float freq = 1.0f / std::pow(rope_theta, static_cast<float>(2 * i) / static_cast<float>(hidden_dim));
+        freqs.push_back(freq);
+    }
+    
+    // Apply RoPE rotation
+    if (input_dims.size() == 3) {
+        // 3D case: [batch, seq_len, hidden]
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t s = 0; s < seq_len; ++s) {
+                // Get position for this sequence element
+                float position = (pos_dims.size() == 2) ? pos_data[b * seq_len + s] : pos_data[s];
+                
+                for (size_t i = 0; i < hidden_dim / 2; ++i) {
+                    size_t idx_even = b * seq_len * hidden_dim + s * hidden_dim + 2 * i;
+                    size_t idx_odd = idx_even + 1;
+                    
+                    float x = input_data[idx_even];
+                    float y = input_data[idx_odd];
+                    
+                    float freq = freqs[i];
+                    float cos_val = std::cos(position * freq);
+                    float sin_val = std::sin(position * freq);
+                    
+                    // Rotate the pair (x, y) by the computed angle
+                    result_data[idx_even] = x * cos_val - y * sin_val;
+                    result_data[idx_odd] = x * sin_val + y * cos_val;
+                }
+            }
+        }
+    } else {
+        // 4D case: [batch, num_heads, seq_len, head_dim]
+        size_t num_heads = input_dims[1];
+        
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t h = 0; h < num_heads; ++h) {
+                for (size_t s = 0; s < seq_len; ++s) {
+                    // Get position for this sequence element
+                    float position = (pos_dims.size() == 2) ? pos_data[b * seq_len + s] : pos_data[s];
+                    
+                    for (size_t i = 0; i < hidden_dim / 2; ++i) {
+                        size_t base_idx = b * num_heads * seq_len * hidden_dim + h * seq_len * hidden_dim + s * hidden_dim;
+                        size_t idx_even = base_idx + 2 * i;
+                        size_t idx_odd = idx_even + 1;
+                        
+                        float x = input_data[idx_even];
+                        float y = input_data[idx_odd];
+                        
+                        float freq = freqs[i];
+                        float cos_val = std::cos(position * freq);
+                        float sin_val = std::sin(position * freq);
+                        
+                        // Rotate the pair (x, y) by the computed angle
+                        result_data[idx_even] = x * cos_val - y * sin_val;
+                        result_data[idx_odd] = x * sin_val + y * cos_val;
+                    }
+                }
+            }
+        }
+    }
+    
+    return result;
 }
 
 Tensor TensorEngine::add(const Tensor& a, const Tensor& b) {
