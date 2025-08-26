@@ -27,9 +27,11 @@
 - Comprehensive API design for model loading and inference
 - Manual testing framework with comprehensive coverage
 - Library initialization and lifecycle management
+- **Core mathematical operations** (matrix multiplication, activations, normalization)
+- **Element-wise tensor operations** (add, multiply, scale, bias addition)
 
 ### 🚧 **In Development:**
-- Mathematical operations (GEMM, convolutions, attention)
+- Advanced attention mechanisms (self-attention, multi-head attention)
 - Model format parsers (GGUF, SafeTensors, PyTorch, ONNX)
 - Quantization algorithms (INT4/INT8)
 - GPU acceleration support
@@ -330,11 +332,13 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] Manual testing framework with comprehensive coverage
 - [x] Library initialization and lifecycle management
 
-### Phase 2: Mathematical Operations 🚧 **IN PROGRESS**
-- [ ] Basic linear algebra (GEMM, matrix operations)
-- [ ] Attention mechanisms (self-attention, multi-head)
-- [ ] Activation functions (ReLU, GELU, SiLU)
-- [ ] Layer normalization and embeddings
+### Phase 2: Mathematical Operations ✅ **COMPLETE**
+- [x] Basic linear algebra (GEMM, matrix operations, batch operations)
+- [x] Activation functions (ReLU, GELU, SiLU, Softmax)
+- [x] Layer normalization and RMS normalization
+- [x] Element-wise operations (add, multiply, scale)
+- [x] Bias addition for neural network layers
+- [ ] Advanced attention mechanisms (self-attention, multi-head)
 - [ ] SIMD optimizations (AVX, NEON)
 
 ### Phase 3: Model Loading and Parsing 📋 **PLANNED**
@@ -364,4 +368,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **TurboInfer** - Building the foundation for high-performance LLM inference.
 
-*Current Status: Foundation complete, mathematical operations in development*
+*Current Status: Foundation and core mathematical operations complete, attention mechanisms in development*
