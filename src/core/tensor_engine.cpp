@@ -12,6 +12,12 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Mathematical constants for neural network operations
+namespace {
+    constexpr float GELU_COEFF = 0.044715f;           ///< Coefficient for GELU approximation
+    constexpr float ATTENTION_MASK_VALUE = -1e9f;    ///< Large negative value for attention masking
+}
+
 namespace turboinfer {
 namespace core {
 
@@ -88,6 +94,7 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
         
         // Basic GEMM implementation: C = A * B
         // Using row-major order
+        // TODO(Phase 5): Optimize with loop tiling, SIMD instructions, or BLAS libraries for better performance
         for (size_t i = 0; i < M; ++i) {
             for (size_t j = 0; j < N; ++j) {
                 float sum = 0.0f;
@@ -273,13 +280,12 @@ Tensor TensorEngine::gelu(const Tensor& input) {
         const float* input_data = input.data_ptr<float>();
         float* result_data = result.data_ptr<float>();
         
-        // GELU approximation: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+        // GELU approximation: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + GELU_COEFF * x^3)))
         const float sqrt_2_over_pi = std::sqrt(2.0f / M_PI);
-        const float coeff = 0.044715f;
         
         for (size_t i = 0; i < total_elements; ++i) {
             float x = input_data[i];
-            float tanh_arg = sqrt_2_over_pi * (x + coeff * x * x * x);
+            float tanh_arg = sqrt_2_over_pi * (x + GELU_COEFF * x * x * x);
             result_data[i] = 0.5f * x * (1.0f + std::tanh(tanh_arg));
         }
     } else {
@@ -444,7 +450,7 @@ Tensor TensorEngine::attention(const Tensor& query, const Tensor& key, const Ten
             
             for (size_t i = 0; i < total_elements; ++i) {
                 if (mask_data[i] == 0.0f) {
-                    scores_data[i] += -1e9f;  // Large negative value
+                    scores_data[i] += ATTENTION_MASK_VALUE;  // Large negative value for masking
                 }
             }
         }
