@@ -5,7 +5,15 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#building-from-source)
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
+  <img src### Phase 3: Model Loading and Parsing 🚧 **IN PROGRESS**
+- [x] GGUF format parser and loader (header parsing, metadata reading, tensor data loading)
+- [x] Model format detection and validation
+- [x] Tensor type conversion from GGUF to TurboInfer format
+- [x] Binary file reading with proper error handling
+- [ ] Model metadata and configuration handling
+- [ ] SafeTensors format support
+- [ ] PyTorch model conversion utilities
+- [ ] ONNX model support//cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/bash/bash-original.svg" alt="Batchfile" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/powershell/powershell-original.svg" alt="Powershell" width="32" height="32"/>
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cmake/cmake-original.svg" alt="CMake" width="32" height="32"/>
@@ -38,12 +46,14 @@
 - **Core mathematical operations** (matrix multiplication, activations, normalization)
 - **Element-wise tensor operations** (add, multiply, scale, bias addition)
 - **Advanced mathematical operations** (attention mechanisms, multi-head attention, RoPE)
+- **GGUF model format parser** with complete metadata and tensor reading support
+- **Model format detection** for GGUF, SafeTensors, PyTorch, and ONNX files
 
 ### 🚧 **In Development:**
-- Advanced attention mechanisms (self-attention, multi-head attention)
-- Model format parsers (GGUF, SafeTensors, PyTorch, ONNX)
-- Quantization algorithms (INT4/INT8)
+- SafeTensors, PyTorch, and ONNX format parsers  
+- Quantization algorithms (INT4/INT8) with dequantization support
 - GPU acceleration support
+- Model inference pipeline with tokenization
 
 ## 📋 Requirements
 
@@ -351,8 +361,10 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] Rotary Position Embedding (RoPE) support
 - [ ] SIMD optimizations (AVX, NEON)
 
-### Phase 3: Model Loading and Parsing 📋 **PLANNED**
-- [ ] GGUF format parser and loader
+### Phase 3: Model Loading and Parsing � **IN PROGRESS**
+- [x] GGUF format parser and loader (header parsing, metadata reading, tensor data loading)
+- [x] Model format detection and validation
+- [x] Tensor type conversion from GGUF to TurboInfer format
 - [ ] SafeTensors format support
 - [ ] PyTorch model conversion utilities
 - [ ] ONNX model support
@@ -378,4 +390,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **TurboInfer** - Building the foundation for high-performance LLM inference.
 
-*Current Status: Foundation and all mathematical operations complete, ready for Phase 3 (Model Loading)*
+*Current Status: Foundation, mathematical operations, and GGUF model loading complete. Phase 3 in progress!*
