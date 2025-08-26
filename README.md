@@ -4,6 +4,14 @@
 [![C++](https://img.shields.io/badge/C++-20-blue.svg)](https://isocpp.org/std/the-standard)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#building-from-source)
 
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/bash/bash-original.svg" alt="Batchfile" width="32" height="32"/>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/powershell/powershell-original.svg" alt="Powershell" width="32" height="32"/>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cmake/cmake-original.svg" alt="CMake" width="32" height="32"/>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" alt="Python" width="32" height="32"/>
+</p>
+
 **TurboInfer** is a high-performance, open-source C++ library designed to accelerate inference for large language models (LLMs) in production environments. Built with modern C++20, it provides a solid foundation for implementing transformer-based model inference with optimized tensor operations and memory management.
 
 ## 🚀 Key Features
@@ -27,9 +35,12 @@
 - Comprehensive API design for model loading and inference
 - Manual testing framework with comprehensive coverage
 - Library initialization and lifecycle management
+- **Core mathematical operations** (matrix multiplication, activations, normalization)
+- **Element-wise tensor operations** (add, multiply, scale, bias addition)
+- **Advanced mathematical operations** (attention mechanisms, multi-head attention, RoPE)
 
 ### 🚧 **In Development:**
-- Mathematical operations (GEMM, convolutions, attention)
+- Advanced attention mechanisms (self-attention, multi-head attention)
 - Model format parsers (GGUF, SafeTensors, PyTorch, ONNX)
 - Quantization algorithms (INT4/INT8)
 - GPU acceleration support
@@ -330,11 +341,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] Manual testing framework with comprehensive coverage
 - [x] Library initialization and lifecycle management
 
-### Phase 2: Mathematical Operations 🚧 **IN PROGRESS**
-- [ ] Basic linear algebra (GEMM, matrix operations)
-- [ ] Attention mechanisms (self-attention, multi-head)
-- [ ] Activation functions (ReLU, GELU, SiLU)
-- [ ] Layer normalization and embeddings
+### Phase 2: Mathematical Operations ✅ **COMPLETE**
+- [x] Basic linear algebra (GEMM, matrix operations, batch operations)
+- [x] Activation functions (ReLU, GELU, SiLU, Softmax)
+- [x] Layer normalization and RMS normalization
+- [x] Element-wise operations (add, multiply, scale)
+- [x] Bias addition for neural network layers
+- [x] Advanced attention mechanisms (self-attention, multi-head)
+- [x] Rotary Position Embedding (RoPE) support
 - [ ] SIMD optimizations (AVX, NEON)
 
 ### Phase 3: Model Loading and Parsing 📋 **PLANNED**
@@ -364,4 +378,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **TurboInfer** - Building the foundation for high-performance LLM inference.
 
-*Current Status: Foundation complete, mathematical operations in development*
+*Current Status: Foundation and all mathematical operations complete, ready for Phase 3 (Model Loading)*
