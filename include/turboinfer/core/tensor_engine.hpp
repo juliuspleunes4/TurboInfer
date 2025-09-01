@@ -268,6 +268,32 @@ private:
      * @param b Second tensor.
      * @throws std::runtime_error if tensors are incompatible.
      */
+    void validate_binary_operation(const Tensor& a, const Tensor& b) const;
+
+    // Matrix multiplication helper methods
+    /**
+     * @brief 2D matrix multiplication helper.
+     * @param a Input matrix A (M x K).
+     * @param b Input matrix B (K x N).
+     * @return Output matrix C (M x N).
+     */
+    Tensor matmul_2d(const Tensor& a, const Tensor& b);
+
+    /**
+     * @brief 3D×2D matrix multiplication helper (batched).
+     * @param a Input tensor A (B x M x K).
+     * @param b Input matrix B (K x N).
+     * @return Output tensor C (B x M x N).
+     */
+    Tensor matmul_3d_2d(const Tensor& a, const Tensor& b);
+
+    /**
+     * @brief 3D×3D matrix multiplication helper (batched).
+     * @param a Input tensor A (B x M x K).
+     * @param b Input tensor B (B x K x N).
+     * @return Output tensor C (B x M x N).
+     */
+    Tensor matmul_3d_3d(const Tensor& a, const Tensor& b);
     void validate_binary_op_compatibility(const Tensor& a, const Tensor& b) const;
 };
 

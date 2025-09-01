@@ -272,10 +272,29 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
     const auto& shape_a = a.shape();
     const auto& shape_b = b.shape();
     
-    // Support 2D matrix multiplication (M x K) * (K x N) = (M x N)
-    if (shape_a.ndim() != 2 || shape_b.ndim() != 2) {
-        throw std::runtime_error("Matrix multiplication currently supports only 2D tensors");
+    // Support both 2D and 3D matrix multiplication
+    // 2D: (M x K) * (K x N) = (M x N)
+    // 3D: (B x M x K) * (K x N) = (B x M x N) [batched]
+    // 3D: (B x M x K) * (B x K x N) = (B x M x N) [batched with batch dimension in both]
+    
+    if (shape_a.ndim() == 2 && shape_b.ndim() == 2) {
+        // Standard 2D matrix multiplication
+        return matmul_2d(a, b);
+    } else if (shape_a.ndim() == 3 && shape_b.ndim() == 2) {
+        // Batched 3D × 2D: (B, M, K) × (K, N) → (B, M, N)
+        return matmul_3d_2d(a, b);
+    } else if (shape_a.ndim() == 3 && shape_b.ndim() == 3) {
+        // Batched 3D × 3D: (B, M, K) × (B, K, N) → (B, M, N)
+        return matmul_3d_3d(a, b);
+    } else {
+        throw std::runtime_error("Matrix multiplication supports 2D and 3D tensors only. Got shapes: " +
+                               std::to_string(shape_a.ndim()) + "D × " + std::to_string(shape_b.ndim()) + "D");
     }
+}
+
+Tensor TensorEngine::matmul_2d(const Tensor& a, const Tensor& b) {
+    const auto& shape_a = a.shape();
+    const auto& shape_b = b.shape();
     
     size_t M = shape_a.size(0);  // Rows of A
     size_t K = shape_a.size(1);  // Cols of A / Rows of B
@@ -332,6 +351,108 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
 #endif
     } else {
         throw std::runtime_error("Matrix multiplication currently only supports Float32 data type");
+    }
+    
+    return result;
+}
+
+Tensor TensorEngine::matmul_3d_2d(const Tensor& a, const Tensor& b) {
+    const auto& shape_a = a.shape();
+    const auto& shape_b = b.shape();
+    
+    size_t B = shape_a.size(0);  // Batch size
+    size_t M = shape_a.size(1);  // Rows of A matrices
+    size_t K = shape_a.size(2);  // Cols of A / Rows of B
+    size_t N = shape_b.size(1);  // Cols of B
+    
+    if (K != shape_b.size(0)) {
+        throw std::runtime_error("3D×2D Matrix dimensions incompatible: (" +
+                               std::to_string(B) + "x" + std::to_string(M) + "x" + std::to_string(K) + 
+                               ") * (" + std::to_string(shape_b.size(0)) + "x" + std::to_string(N) + ")");
+    }
+    
+    // Create output tensor (B x M x N)
+    TensorShape output_shape({B, M, N});
+    Tensor result(output_shape, a.dtype());
+    
+    if (a.dtype() == DataType::kFloat32) {
+        const float* a_data = a.data_ptr<float>();
+        const float* b_data = b.data_ptr<float>();
+        float* result_data = result.data_ptr<float>();
+        
+        // Perform batched matrix multiplication
+        // For each batch, compute: A[b] * B = C[b]
+        for (size_t b = 0; b < B; ++b) {
+            const float* a_batch = a_data + b * M * K;  // Start of batch b in A
+            float* result_batch = result_data + b * M * N;  // Start of batch b in result
+            
+            // Standard 2D matrix multiplication for this batch
+            for (size_t i = 0; i < M; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    float sum = 0.0f;
+                    for (size_t k = 0; k < K; ++k) {
+                        sum += a_batch[i * K + k] * b_data[k * N + j];
+                    }
+                    result_batch[i * N + j] = sum;
+                }
+            }
+        }
+    } else {
+        throw std::runtime_error("3D matrix multiplication currently only supports Float32 data type");
+    }
+    
+    return result;
+}
+
+Tensor TensorEngine::matmul_3d_3d(const Tensor& a, const Tensor& b) {
+    const auto& shape_a = a.shape();
+    const auto& shape_b = b.shape();
+    
+    size_t B = shape_a.size(0);  // Batch size
+    size_t M = shape_a.size(1);  // Rows of A matrices
+    size_t K = shape_a.size(2);  // Cols of A / Rows of B
+    size_t N = shape_b.size(2);  // Cols of B matrices
+    
+    if (B != shape_b.size(0)) {
+        throw std::runtime_error("3D×3D Batch sizes must match: " +
+                               std::to_string(B) + " vs " + std::to_string(shape_b.size(0)));
+    }
+    
+    if (K != shape_b.size(1)) {
+        throw std::runtime_error("3D×3D Matrix dimensions incompatible: (" +
+                               std::to_string(B) + "x" + std::to_string(M) + "x" + std::to_string(K) + 
+                               ") * (" + std::to_string(shape_b.size(0)) + "x" + std::to_string(shape_b.size(1)) + "x" + std::to_string(N) + ")");
+    }
+    
+    // Create output tensor (B x M x N)
+    TensorShape output_shape({B, M, N});
+    Tensor result(output_shape, a.dtype());
+    
+    if (a.dtype() == DataType::kFloat32) {
+        const float* a_data = a.data_ptr<float>();
+        const float* b_data = b.data_ptr<float>();
+        float* result_data = result.data_ptr<float>();
+        
+        // Perform batched matrix multiplication
+        // For each batch, compute: A[b] * B[b] = C[b]
+        for (size_t b = 0; b < B; ++b) {
+            const float* a_batch = a_data + b * M * K;      // Start of batch b in A
+            const float* b_batch = b_data + b * K * N;      // Start of batch b in B  
+            float* result_batch = result_data + b * M * N;  // Start of batch b in result
+            
+            // Standard 2D matrix multiplication for this batch
+            for (size_t i = 0; i < M; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    float sum = 0.0f;
+                    for (size_t k = 0; k < K; ++k) {
+                        sum += a_batch[i * K + k] * b_batch[k * N + j];
+                    }
+                    result_batch[i * N + j] = sum;
+                }
+            }
+        }
+    } else {
+        throw std::runtime_error("3D matrix multiplication currently only supports Float32 data type");
     }
     
     return result;
