@@ -74,7 +74,7 @@ function Clean-Project {
     Write-Host "✅ Project cleaned!" -ForegroundColor Green
 }
 
-function Show-Help {
+function Write-Help {
     Write-Banner "TurboInfer Development Helper"
     Write-Host "Usage: .\scripts\dev.ps1 [action]" -ForegroundColor Yellow
     Write-Host ""
@@ -95,9 +95,9 @@ switch ($Action.ToLower()) {
     "build" { Build-Project }
     "test" { Test-Library }
     "clean" { Clean-Project }
-    "help" { Show-Help }
+    "help" { Write-Help }
     default { 
         Write-Host "❌ Unknown action: $Action" -ForegroundColor Red
-        Show-Help 
+        Write-Help 
     }
 }
