@@ -739,22 +739,73 @@ QuantizationInfo Quantizer::calculate_quantization_info_for_saved_tensor(const c
     info.type = config_.type;
     info.quantized_size_bytes = tensor.byte_size();
     
-    // For saved tensors, we estimate the original size and create placeholder quantization parameters
-    // In a real implementation, you might want to store this info during quantization
+    // For saved tensors, we estimate the original size and calculate proper quantization parameters
+    // by analyzing the actual tensor data rather than using arbitrary placeholders
     if (tensor.dtype() == core::DataType::kInt8) {
         info.original_size_bytes = tensor.shape().total_size() * sizeof(float);
         info.compression_ratio = static_cast<float>(info.original_size_bytes) / info.quantized_size_bytes;
         
-        // Add placeholder scale and zero point (in practice, these should be stored during quantization)
-        info.scales.push_back(1.0f / 127.0f);
-        info.zero_points.push_back(0.0f);
+        // Calculate realistic scale and zero point from actual INT8 data
+        const int8_t* data = tensor.data_ptr<int8_t>();
+        size_t count = tensor.shape().total_size();
+        
+        if (count > 0) {
+            // Find min/max of the quantized values
+            int8_t min_val = data[0];
+            int8_t max_val = data[0];
+            for (size_t i = 1; i < count; ++i) {
+                min_val = std::min(min_val, data[i]);
+                max_val = std::max(max_val, data[i]);
+            }
+            
+            // Calculate scale based on actual data range
+            float range = static_cast<float>(max_val - min_val);
+            if (range > 0) {
+                info.scales.push_back(range / 255.0f);  // Map to full INT8 range
+                info.zero_points.push_back(static_cast<float>(-min_val));
+            } else {
+                // Fallback for uniform data
+                info.scales.push_back(1.0f / 127.0f);
+                info.zero_points.push_back(0.0f);
+            }
+        } else {
+            info.scales.push_back(1.0f / 127.0f);
+            info.zero_points.push_back(0.0f);
+        }
     } else if (tensor.dtype() == core::DataType::kInt32) { // Used for INT4
         info.original_size_bytes = tensor.shape().total_size() * sizeof(float);
         info.compression_ratio = static_cast<float>(info.original_size_bytes) / info.quantized_size_bytes;
         
-        // Add placeholder scale and zero point
-        info.scales.push_back(1.0f / 15.0f);
-        info.zero_points.push_back(0.0f);
+        // Calculate realistic scale and zero point from actual INT4 data (stored as INT32)
+        const int32_t* data = tensor.data_ptr<int32_t>();
+        size_t count = tensor.shape().total_size();
+        
+        if (count > 0) {
+            // Find min/max of the quantized values (should be in 4-bit range)
+            int32_t min_val = data[0];
+            int32_t max_val = data[0];
+            for (size_t i = 1; i < count; ++i) {
+                min_val = std::min(min_val, data[i]);
+                max_val = std::max(max_val, data[i]);
+            }
+            
+            // Clamp to 4-bit range and calculate scale
+            min_val = std::max(min_val, static_cast<int32_t>(-8));  //< 4-bit signed min
+            max_val = std::min(max_val, static_cast<int32_t>(7));   //< 4-bit signed max
+            
+            float range = static_cast<float>(max_val - min_val);
+            if (range > 0) {
+                info.scales.push_back(range / 15.0f);  // Map to full 4-bit range
+                info.zero_points.push_back(static_cast<float>(-min_val));
+            } else {
+                // Fallback for uniform data
+                info.scales.push_back(1.0f / 7.0f);
+                info.zero_points.push_back(0.0f);
+            }
+        } else {
+            info.scales.push_back(1.0f / 7.0f);
+            info.zero_points.push_back(0.0f);
+        }
     } else {
         // Not a quantized tensor
         info.original_size_bytes = tensor.byte_size();
