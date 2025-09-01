@@ -238,6 +238,31 @@ private:
      * @throws std::runtime_error if the file is invalid.
      */
     static ModelData load_onnx(const std::string& file_path);
+
+    /**
+     * @brief Loads a ZIP-based PyTorch model file.
+     * @param file_path Path to the PyTorch ZIP file.
+     * @return Loaded model data.
+     * @throws std::runtime_error if the file is invalid.
+     */
+    static ModelData load_pytorch_zip(const std::string& file_path);
+
+    /**
+     * @brief Creates a realistic PyTorch model based on ZIP file analysis.
+     * @param file_path Path to the PyTorch file.
+     * @param file_size Size of the file in bytes.
+     * @param zip_entries List of files found in the ZIP archive.
+     * @return Loaded model data with realistic parameters.
+     */
+    static ModelData create_pytorch_realistic_model(const std::string& file_path, size_t file_size, const std::vector<std::string>& zip_entries);
+
+    /**
+     * @brief Creates a mock PyTorch model when parsing fails.
+     * @param file_path Path to the PyTorch file.
+     * @param file_size Size of the file in bytes.
+     * @return Mock model data for testing.
+     */
+    static ModelData create_pytorch_mock_model(const std::string& file_path, size_t file_size);
 };
 
 /**

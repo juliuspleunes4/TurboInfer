@@ -15,6 +15,21 @@ set_target_properties(basic_inference PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# PyTorch loader demo
+add_executable(pytorch_loader_demo
+    pytorch_loader_demo.cpp
+)
+
+target_link_libraries(pytorch_loader_demo
+    turboinfer
+)
+
+# Set target properties
+set_target_properties(pytorch_loader_demo PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
 # Add more examples here as they are created
 # add_executable(batch_inference batch_inference.cpp)
 # target_link_libraries(batch_inference turboinfer)
@@ -23,6 +38,6 @@ set_target_properties(basic_inference PROPERTIES
 # target_link_libraries(quantization_example turboinfer)
 
 # Install examples
-install(TARGETS basic_inference
+install(TARGETS basic_inference pytorch_loader_demo
     RUNTIME DESTINATION bin/examples
 )

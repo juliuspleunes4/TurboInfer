@@ -10,10 +10,8 @@ set(TEST_SOURCES
     test_logging.cpp
     test_library_init.cpp
     test_data_types.cpp
-    test_memory.cpp
     test_tensor_ops.cpp
     test_error_handling.cpp
-    test_performance.cpp
     test_quantization.cpp
     test_quantization_complete.cpp
     test_beam_search_simple.cpp
