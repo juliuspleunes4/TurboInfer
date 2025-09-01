@@ -28,6 +28,8 @@ struct InferenceConfig {
     float temperature = 1.0f;              ///< Sampling temperature
     float top_p = 0.9f;                    ///< Top-p sampling threshold
     size_t top_k = 50;                     ///< Top-k sampling limit
+    float length_penalty = 1.0f;           ///< Length penalty for beam search
+    int eos_token_id = 2;                  ///< End-of-sequence token ID
     bool use_cache = true;                 ///< Enable KV cache for efficiency
     core::ComputeDevice device = core::ComputeDevice::kAuto; ///< Compute device
 };
@@ -310,6 +312,31 @@ private:
     std::unordered_map<int, std::string> id_to_token_;   ///< ID to token mapping
     std::vector<std::pair<std::string, std::string>> bpe_merges_; ///< BPE merge rules
 
+    // Beam search helper functions
+    
+    /**
+     * @brief Convert logits to probabilities using softmax.
+     * @param logits Input logits vector.
+     * @return Probability distribution.
+     */
+    std::vector<float> softmax(const std::vector<float>& logits);
+    
+    /**
+     * @brief Apply top-k filtering to probabilities.
+     * @param probs Input probabilities.
+     * @param k Number of top tokens to keep.
+     * @return Filtered probabilities.
+     */
+    std::vector<float> apply_top_k_filtering(const std::vector<float>& probs, size_t k);
+    
+    /**
+     * @brief Apply top-p (nucleus) filtering to probabilities.
+     * @param probs Input probabilities.
+     * @param p Cumulative probability threshold.
+     * @return Filtered probabilities.
+     */
+    std::vector<float> apply_top_p_filtering(const std::vector<float>& probs, float p);
+
     /**
      * @brief Beam search helper structure for maintaining candidate sequences.
      */
@@ -317,6 +344,7 @@ private:
         std::vector<int> tokens;
         float score;
         float log_prob;
+        float normalized_score = 0.0f;  ///< Length-normalized score for ranking
         bool finished;
         
         BeamCandidate(const std::vector<int>& initial_tokens = {})

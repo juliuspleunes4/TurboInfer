@@ -9,6 +9,7 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <queue>
 #include <cmath>
 #include <sstream>
 #include <iomanip>
@@ -1544,19 +1545,277 @@ core::Tensor InferenceEngine::apply_top_p(const core::Tensor& logits, float p) {
     return filtered_logits;
 }
 
+std::vector<float> InferenceEngine::softmax(const std::vector<float>& logits) {
+    std::vector<float> probs(logits.size());
+    
+    // Find maximum for numerical stability
+    float max_logit = *std::max_element(logits.begin(), logits.end());
+    
+    // Compute exponentials and sum
+    float sum = 0.0f;
+    for (size_t i = 0; i < logits.size(); ++i) {
+        probs[i] = std::exp(logits[i] - max_logit);
+        sum += probs[i];
+    }
+    
+    // Normalize
+    if (sum > 0.0f) {
+        for (auto& prob : probs) {
+            prob /= sum;
+        }
+    }
+    
+    return probs;
+}
+
+std::vector<float> InferenceEngine::apply_top_k_filtering(const std::vector<float>& probs, size_t k) {
+    std::vector<float> filtered_probs = probs;
+    
+    if (k >= probs.size()) {
+        return filtered_probs; // No filtering needed
+    }
+    
+    // Create index-probability pairs
+    std::vector<std::pair<float, size_t>> prob_indices;
+    for (size_t i = 0; i < probs.size(); ++i) {
+        prob_indices.emplace_back(probs[i], i);
+    }
+    
+    // Sort by probability (descending)
+    std::sort(prob_indices.begin(), prob_indices.end(), 
+             [](const auto& a, const auto& b) { return a.first > b.first; });
+    
+    // Zero out probabilities outside top-k
+    for (size_t i = k; i < prob_indices.size(); ++i) {
+        filtered_probs[prob_indices[i].second] = 0.0f;
+    }
+    
+    // Renormalize
+    float sum = 0.0f;
+    for (float prob : filtered_probs) {
+        sum += prob;
+    }
+    
+    if (sum > 0.0f) {
+        for (auto& prob : filtered_probs) {
+            prob /= sum;
+        }
+    }
+    
+    return filtered_probs;
+}
+
+std::vector<float> InferenceEngine::apply_top_p_filtering(const std::vector<float>& probs, float p) {
+    std::vector<float> filtered_probs = probs;
+    
+    if (p >= 1.0f) {
+        return filtered_probs; // No filtering needed
+    }
+    
+    // Create index-probability pairs and sort by probability (descending)
+    std::vector<std::pair<float, size_t>> prob_indices;
+    for (size_t i = 0; i < probs.size(); ++i) {
+        prob_indices.emplace_back(probs[i], i);
+    }
+    
+    std::sort(prob_indices.begin(), prob_indices.end(), 
+             [](const auto& a, const auto& b) { return a.first > b.first; });
+    
+    // Find nucleus (top-p set)
+    float cumulative_prob = 0.0f;
+    std::vector<bool> in_nucleus(probs.size(), false);
+    
+    for (const auto& pair : prob_indices) {
+        float prob = pair.first;
+        size_t index = pair.second;
+        
+        cumulative_prob += prob;
+        in_nucleus[index] = true;
+        
+        if (cumulative_prob >= p) {
+            break;
+        }
+    }
+    
+    // Zero out probabilities outside nucleus
+    for (size_t i = 0; i < probs.size(); ++i) {
+        if (!in_nucleus[i]) {
+            filtered_probs[i] = 0.0f;
+        }
+    }
+    
+    // Renormalize
+    float sum = 0.0f;
+    for (float prob : filtered_probs) {
+        sum += prob;
+    }
+    
+    if (sum > 0.0f) {
+        for (auto& prob : filtered_probs) {
+            prob /= sum;
+        }
+    }
+    
+    return filtered_probs;
+}
+
 std::vector<InferenceEngine::BeamCandidate> InferenceEngine::beam_search_decode(
     const std::vector<int>& input_tokens,
     size_t max_new_tokens,
     size_t beam_size) {
     
-    // Simple placeholder implementation
-    std::vector<BeamCandidate> results;
-    BeamCandidate result;
-    result.tokens = input_tokens;
-    result.log_prob = 0.0f;
-    result.finished = true;
-    results.push_back(result);
-    return results;
+    if (beam_size == 0) {
+        throw std::invalid_argument("Beam size must be greater than 0");
+    }
+    
+    // Priority queue for beam candidates (max-heap by log probability)
+    auto compare = [](const BeamCandidate& a, const BeamCandidate& b) {
+        return a.log_prob < b.log_prob; // For max-heap behavior
+    };
+    std::priority_queue<BeamCandidate, std::vector<BeamCandidate>, decltype(compare)> beam(compare);
+    
+    // Initialize beam with input sequence
+    BeamCandidate initial_candidate;
+    initial_candidate.tokens = input_tokens;
+    initial_candidate.log_prob = 0.0f;
+    initial_candidate.finished = false;
+    beam.push(initial_candidate);
+    
+    std::vector<BeamCandidate> finished_sequences;
+    
+    // Generate tokens iteratively
+    for (size_t step = 0; step < max_new_tokens; ++step) {
+        std::vector<BeamCandidate> current_candidates;
+        
+        // Extract all current beam candidates
+        while (!beam.empty()) {
+            current_candidates.push_back(beam.top());
+            beam.pop();
+        }
+        
+        // If no candidates left, break
+        if (current_candidates.empty()) {
+            break;
+        }
+        
+        std::vector<BeamCandidate> next_candidates;
+        
+        // Expand each candidate
+        for (const auto& candidate : current_candidates) {
+            if (candidate.finished) {
+                finished_sequences.push_back(candidate);
+                continue;
+            }
+            
+            // Get next token logits for this candidate
+            auto logits_tensor = forward_pass(candidate.tokens);
+            
+            // Extract logits data (assume last token's logits)
+            const float* logits_data = logits_tensor.data_ptr<float>();
+            size_t vocab_size = logits_tensor.shape().total_size() / logits_tensor.shape().size(0); // Total size / batch size
+            
+            // Convert to vector for easier manipulation
+            std::vector<float> logits(logits_data, logits_data + vocab_size);
+            
+            // Apply temperature scaling if configured
+            if (config_.temperature != 1.0f) {
+                for (auto& logit : logits) {
+                    logit /= config_.temperature;
+                }
+            }
+            
+            // Convert logits to probabilities
+            std::vector<float> probs = softmax(logits);
+            
+            // Apply top-k filtering if configured
+            if (config_.top_k > 0 && config_.top_k < probs.size()) {
+                probs = apply_top_k_filtering(probs, config_.top_k);
+            }
+            
+            // Apply top-p (nucleus) filtering if configured
+            if (config_.top_p < 1.0f) {
+                probs = apply_top_p_filtering(probs, config_.top_p);
+            }
+            
+            // Get top beam_size candidates for expansion
+            std::vector<std::pair<float, int>> prob_token_pairs;
+            for (size_t i = 0; i < probs.size(); ++i) {
+                if (probs[i] > 0.0f) {
+                    prob_token_pairs.emplace_back(probs[i], static_cast<int>(i));
+                }
+            }
+            
+            // Sort by probability (descending)
+            std::sort(prob_token_pairs.begin(), prob_token_pairs.end(), 
+                     [](const auto& a, const auto& b) { return a.first > b.first; });
+            
+            // Take top candidates for beam expansion
+            size_t expansion_count = std::min(beam_size, prob_token_pairs.size());
+            for (size_t i = 0; i < expansion_count; ++i) {
+                float prob = prob_token_pairs[i].first;
+                int token = prob_token_pairs[i].second;
+                
+                if (prob <= 0.0f) continue; // Skip zero probability tokens
+                
+                BeamCandidate new_candidate = candidate;
+                new_candidate.tokens.push_back(token);
+                new_candidate.log_prob += std::log(prob);
+                
+                // Check if sequence is finished (EOS token or max length)
+                new_candidate.finished = (token == config_.eos_token_id) || 
+                                       (new_candidate.tokens.size() >= input_tokens.size() + max_new_tokens);
+                
+                next_candidates.push_back(new_candidate);
+            }
+        }
+        
+        // Apply length normalization and select best candidates
+        for (auto& candidate : next_candidates) {
+            // Length normalization: divide by sequence length^alpha
+            float length_penalty = std::pow(static_cast<float>(candidate.tokens.size()), config_.length_penalty);
+            candidate.normalized_score = candidate.log_prob / length_penalty;
+        }
+        
+        // Sort by normalized score and keep top beam_size candidates
+        std::sort(next_candidates.begin(), next_candidates.end(), 
+                 [](const auto& a, const auto& b) { 
+                     return a.normalized_score > b.normalized_score; 
+                 });
+        
+        // Add top candidates back to beam
+        size_t candidates_to_keep = std::min(beam_size, next_candidates.size());
+        for (size_t i = 0; i < candidates_to_keep; ++i) {
+            if (next_candidates[i].finished) {
+                finished_sequences.push_back(next_candidates[i]);
+            } else {
+                beam.push(next_candidates[i]);
+            }
+        }
+        
+        // Early stopping: if we have enough finished sequences
+        if (finished_sequences.size() >= beam_size) {
+            break;
+        }
+    }
+    
+    // Collect remaining beam candidates as finished
+    while (!beam.empty()) {
+        BeamCandidate candidate = beam.top();
+        beam.pop();
+        candidate.finished = true;
+        finished_sequences.push_back(candidate);
+    }
+    
+    // Sort final results by normalized score
+    std::sort(finished_sequences.begin(), finished_sequences.end(), 
+             [](const auto& a, const auto& b) { 
+                 return a.normalized_score > b.normalized_score; 
+             });
+    
+    // Return top beam_size results
+    size_t result_count = std::min(beam_size, finished_sequences.size());
+    return std::vector<BeamCandidate>(finished_sequences.begin(), 
+                                     finished_sequences.begin() + result_count);
 }
 
 std::unique_ptr<InferenceEngine> create_engine(const std::string& model_path, const InferenceConfig& config) {
