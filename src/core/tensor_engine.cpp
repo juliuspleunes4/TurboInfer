@@ -265,12 +265,19 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
         throw std::runtime_error("Cannot perform matrix multiplication on empty tensors");
     }
     
-    if (a.dtype() != b.dtype()) {
-        throw std::runtime_error("Tensor data types must match for matrix multiplication");
+    // Handle mixed data types by converting to Float32 for computation
+    Tensor a_converted = a;
+    Tensor b_converted = b;
+    
+    if (a.dtype() != DataType::kFloat32) {
+        a_converted = convert_dtype(a, DataType::kFloat32);
+    }
+    if (b.dtype() != DataType::kFloat32) {
+        b_converted = convert_dtype(b, DataType::kFloat32);
     }
     
-    const auto& shape_a = a.shape();
-    const auto& shape_b = b.shape();
+    const auto& shape_a = a_converted.shape();
+    const auto& shape_b = b_converted.shape();
     
     // Support both 2D and 3D matrix multiplication
     // 2D: (M x K) * (K x N) = (M x N)
@@ -279,13 +286,13 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
     
     if (shape_a.ndim() == 2 && shape_b.ndim() == 2) {
         // Standard 2D matrix multiplication
-        return matmul_2d(a, b);
+        return matmul_2d(a_converted, b_converted);
     } else if (shape_a.ndim() == 3 && shape_b.ndim() == 2) {
         // Batched 3D × 2D: (B, M, K) × (K, N) → (B, M, N)
-        return matmul_3d_2d(a, b);
+        return matmul_3d_2d(a_converted, b_converted);
     } else if (shape_a.ndim() == 3 && shape_b.ndim() == 3) {
         // Batched 3D × 3D: (B, M, K) × (B, K, N) → (B, M, N)
-        return matmul_3d_3d(a, b);
+        return matmul_3d_3d(a_converted, b_converted);
     } else {
         throw std::runtime_error("Matrix multiplication supports 2D and 3D tensors only. Got shapes: " +
                                std::to_string(shape_a.ndim()) + "D × " + std::to_string(shape_b.ndim()) + "D");
@@ -1016,35 +1023,42 @@ Tensor TensorEngine::rms_norm(const Tensor& input, const Tensor& weight, float e
         throw std::runtime_error("Weight size must match the last dimension of input tensor");
     }
     
-    // Create result tensor with same shape as input
-    Tensor result(input.shape(), input.dtype());
+    // Convert inputs to Float32 if needed
+    Tensor input_converted = input;
+    Tensor weight_converted = weight;
     
-    if (input.dtype() == DataType::kFloat32) {
-        const float* input_data = input.data_ptr<float>();
-        const float* weight_data = weight.data_ptr<float>();
-        float* result_data = result.data_ptr<float>();
+    if (input.dtype() != DataType::kFloat32) {
+        input_converted = convert_dtype(input, DataType::kFloat32);
+    }
+    if (weight.dtype() != DataType::kFloat32) {
+        weight_converted = convert_dtype(weight, DataType::kFloat32);
+    }
+    
+    // Create result tensor with same shape as input, but in Float32
+    Tensor result(input_converted.shape(), DataType::kFloat32);
+    
+    const float* input_data = input_converted.data_ptr<float>();
+    const float* weight_data = weight_converted.data_ptr<float>();
+    float* result_data = result.data_ptr<float>();
+    
+    size_t feature_size = input_dims.back();
+    size_t batch_size = input_converted.shape().total_size() / feature_size;
+    
+    for (size_t batch = 0; batch < batch_size; ++batch) {
+        size_t offset = batch * feature_size;
         
-        size_t feature_size = input_dims.back();
-        size_t batch_size = input.shape().total_size() / feature_size;
-        
-        for (size_t batch = 0; batch < batch_size; ++batch) {
-            size_t offset = batch * feature_size;
-            
-            // Calculate root mean square
-            float sum_squares = 0.0f;
-            for (size_t i = 0; i < feature_size; ++i) {
-                float val = input_data[offset + i];
-                sum_squares += val * val;
-            }
-            float rms = std::sqrt(sum_squares / static_cast<float>(feature_size) + eps);
-            
-            // Apply normalization: x / rms * weight
-            for (size_t i = 0; i < feature_size; ++i) {
-                result_data[offset + i] = (input_data[offset + i] / rms) * weight_data[i];
-            }
+        // Calculate root mean square
+        float sum_squares = 0.0f;
+        for (size_t i = 0; i < feature_size; ++i) {
+            float val = input_data[offset + i];
+            sum_squares += val * val;
         }
-    } else {
-        throw std::runtime_error("RMS normalization currently only supports Float32 data type");
+        float rms = std::sqrt(sum_squares / static_cast<float>(feature_size) + eps);
+        
+        // Apply normalization: x / rms * weight
+        for (size_t i = 0; i < feature_size; ++i) {
+            result_data[offset + i] = (input_data[offset + i] / rms) * weight_data[i];
+        }
     }
     
     return result;
@@ -1329,6 +1343,74 @@ void TensorEngine::validate_binary_op_compatibility(const Tensor& a, const Tenso
     if (a.dtype() != b.dtype()) {
         throw std::runtime_error("Tensor data types must match for binary operations");
     }
+}
+
+Tensor TensorEngine::convert_dtype(const Tensor& input, DataType target_dtype) {
+    if (input.dtype() == target_dtype) {
+        return input;  // No conversion needed
+    }
+    
+    // Create output tensor with target data type
+    Tensor result(input.shape(), target_dtype);
+    size_t num_elements = input.shape().total_size();
+    
+    // Convert based on source and target types
+    if (input.dtype() == DataType::kInt8 && target_dtype == DataType::kFloat32) {
+        // INT8 -> Float32
+        const int8_t* src_data = input.data_ptr<int8_t>();
+        float* dst_data = result.data_ptr<float>();
+        
+        for (size_t i = 0; i < num_elements; ++i) {
+            dst_data[i] = static_cast<float>(src_data[i]);
+        }
+        
+    } else if (input.dtype() == DataType::kUInt8 && target_dtype == DataType::kFloat32) {
+        // INT4 (stored as UInt8) -> Float32
+        const uint8_t* src_data = input.data_ptr<uint8_t>();
+        float* dst_data = result.data_ptr<float>();
+        
+        for (size_t i = 0; i < num_elements; ++i) {
+            dst_data[i] = static_cast<float>(src_data[i]);
+        }
+        
+    } else if (input.dtype() == DataType::kInt32 && target_dtype == DataType::kFloat32) {
+        // INT4 (stored as Int32) -> Float32
+        const int32_t* src_data = input.data_ptr<int32_t>();
+        float* dst_data = result.data_ptr<float>();
+        
+        for (size_t i = 0; i < num_elements; ++i) {
+            dst_data[i] = static_cast<float>(src_data[i]);
+        }
+        
+    } else if (input.dtype() == DataType::kFloat32 && target_dtype == DataType::kInt8) {
+        // Float32 -> INT8
+        const float* src_data = input.data_ptr<float>();
+        int8_t* dst_data = result.data_ptr<int8_t>();
+        
+        for (size_t i = 0; i < num_elements; ++i) {
+            float val = src_data[i];
+            val = std::max(-128.0f, std::min(127.0f, val));  // Manual clamp
+            dst_data[i] = static_cast<int8_t>(std::round(val));
+        }
+        
+    } else if (input.dtype() == DataType::kFloat32 && target_dtype == DataType::kUInt8) {
+        // Float32 -> INT4 (stored as UInt8)
+        const float* src_data = input.data_ptr<float>();
+        uint8_t* dst_data = result.data_ptr<uint8_t>();
+        
+        for (size_t i = 0; i < num_elements; ++i) {
+            float val = src_data[i];
+            val = std::max(0.0f, std::min(15.0f, val));  // Manual clamp
+            dst_data[i] = static_cast<uint8_t>(std::round(val));
+        }
+        
+    } else {
+        throw std::runtime_error("Unsupported data type conversion: " + 
+                               std::to_string(static_cast<int>(input.dtype())) + " -> " +
+                               std::to_string(static_cast<int>(target_dtype)));
+    }
+    
+    return result;
 }
 
 const char* device_to_string(ComputeDevice device) {

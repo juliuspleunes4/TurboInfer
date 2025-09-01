@@ -265,5 +265,9 @@ template uint8_t* Tensor::data_ptr<uint8_t>();
 template const uint8_t* Tensor::data_ptr<uint8_t>() const;
 template void Tensor::fill<uint8_t>(uint8_t);
 
+template int8_t* Tensor::data_ptr<int8_t>();
+template const int8_t* Tensor::data_ptr<int8_t>() const;
+template void Tensor::fill<int8_t>(int8_t);
+
 } // namespace core
 } // namespace turboinfer

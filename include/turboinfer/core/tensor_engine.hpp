@@ -294,6 +294,15 @@ private:
      * @return Output tensor C (B x M x N).
      */
     Tensor matmul_3d_3d(const Tensor& a, const Tensor& b);
+    
+    /**
+     * @brief Converts tensor to specified data type.
+     * @param input Input tensor.
+     * @param target_dtype Target data type.
+     * @return Converted tensor.
+     */
+    Tensor convert_dtype(const Tensor& input, DataType target_dtype);
+    
     void validate_binary_op_compatibility(const Tensor& a, const Tensor& b) const;
 };
 
