@@ -43,11 +43,17 @@ function Test-Library {
         if ($LASTEXITCODE -ne 0) { return }
     }
     
-    if (Test-Path "tools/test_library.py") {
-        Write-Host "Running Python test script..." -ForegroundColor Yellow
-        python tools/test_library.py
+    # Run library initialization test
+    if (Test-Path "build/bin/test_library_init.exe") {
+        Write-Host "Running library initialization test..." -ForegroundColor Yellow
+        & "build/bin/test_library_init.exe"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Library test passed" -ForegroundColor Green
+        } else {
+            Write-Host "❌ Library test failed" -ForegroundColor Red
+        }
     } else {
-        Write-Host "❌ Test script not found" -ForegroundColor Red
+        Write-Host "❌ Library test executable not found" -ForegroundColor Red
     }
 }
 

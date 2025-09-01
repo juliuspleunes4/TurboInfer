@@ -140,19 +140,19 @@ function Invoke-AllTests {
 function Invoke-IntegrationTests {
     Write-Section "Running Integration Tests"
     
-    # Test library initialization cycle
+    # Test library initialization using C++ tests
     Write-Host "Testing library initialization..." -ForegroundColor Yellow
     
-    if (Test-Path "tools/test_library.py") {
-        python tools/test_library.py
+    if (Test-Path "build/bin/test_library_init.exe") {
+        & "build/bin/test_library_init.exe" | Out-Host
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Integration test passed" -ForegroundColor Green
+            Write-Host "✅ Library initialization test passed" -ForegroundColor Green
         } else {
-            Write-Host "❌ Integration test failed" -ForegroundColor Red
+            Write-Host "❌ Library initialization test failed" -ForegroundColor Red
             return $LASTEXITCODE
         }
     } else {
-        Write-Host "⚠️ Integration test script not found" -ForegroundColor Yellow
+        Write-Host "⚠️ Library initialization test executable not found" -ForegroundColor Yellow
     }
     
     # Test example compilation and execution
