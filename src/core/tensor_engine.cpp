@@ -190,44 +190,61 @@ namespace simd_utils {
      */
     void simd_gemm_float(const float* a_data, const float* b_data, float* result_data,
                         size_t M, size_t K, size_t N) {
-        // Use tiled approach with SIMD for better cache locality and vectorization
-        constexpr size_t TILE_SIZE = 64;  // Tile size for cache optimization
+        // Enhanced tiled approach with optimized cache blocking and unrolling
+        constexpr size_t TILE_M = 64;    // Optimized for L1 cache
+        constexpr size_t TILE_N = 128;   // Larger N tile for better vectorization  
+        constexpr size_t TILE_K = 256;   // Larger K tile for better reuse
+        constexpr size_t UNROLL_M = 4;   // Unroll factor for M dimension
         
-        for (size_t i_tile = 0; i_tile < M; i_tile += TILE_SIZE) {
-            for (size_t j_tile = 0; j_tile < N; j_tile += TILE_SIZE) {
-                for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
-                    // Process tile
-                    size_t i_end = std::min(i_tile + TILE_SIZE, M);
-                    size_t j_end = std::min(j_tile + TILE_SIZE, N);
-                    size_t k_end = std::min(k_tile + TILE_SIZE, K);
+        // Initialize result to zero
+        std::fill(result_data, result_data + M * N, 0.0f);
+        
+        #pragma omp parallel for schedule(dynamic) if(M > 32)
+        for (size_t i_tile = 0; i_tile < M; i_tile += TILE_M) {
+            for (size_t k_tile = 0; k_tile < K; k_tile += TILE_K) {
+                for (size_t j_tile = 0; j_tile < N; j_tile += TILE_N) {
+                    // Process tile with optimized inner loops
+                    size_t i_end = std::min(i_tile + TILE_M, M);
+                    size_t k_end = std::min(k_tile + TILE_K, K);
+                    size_t j_end = std::min(j_tile + TILE_N, N);
                     
-                    for (size_t i = i_tile; i < i_end; ++i) {
+                    // Process in unrolled blocks for better instruction-level parallelism
+                    for (size_t i = i_tile; i < i_end; i += UNROLL_M) {
+                        size_t i_unroll_end = std::min(i + UNROLL_M, i_end);
+                        
                         for (size_t j = j_tile; j < j_end; j += AVX2_FLOAT_COUNT) {
-                            // Vectorize inner loop using AVX2
                             size_t j_vec_end = std::min(j + AVX2_FLOAT_COUNT, j_end);
-                            __m256 sum_vec = _mm256_setzero_ps();
-                            
-                            for (size_t k = k_tile; k < k_end; ++k) {
-                                __m256 a_vec = _mm256_broadcast_ss(&a_data[i * K + k]);
-                                
-                                if (j_vec_end - j == AVX2_FLOAT_COUNT) {
-                                    __m256 b_vec = _mm256_loadu_ps(&b_data[k * N + j]);
-                                    sum_vec = _mm256_fmadd_ps(a_vec, b_vec, sum_vec);
-                                } else {
-                                    // Handle remainder elements
-                                    for (size_t jj = j; jj < j_vec_end; ++jj) {
-                                        result_data[i * N + jj] += a_data[i * K + k] * b_data[k * N + jj];
-                                    }
-                                    break;
-                                }
-                            }
                             
                             if (j_vec_end - j == AVX2_FLOAT_COUNT) {
-                                if (k_tile == 0) {
-                                    _mm256_storeu_ps(&result_data[i * N + j], sum_vec);
-                                } else {
-                                    __m256 existing = _mm256_loadu_ps(&result_data[i * N + j]);
-                                    _mm256_storeu_ps(&result_data[i * N + j], _mm256_add_ps(existing, sum_vec));
+                                // Process multiple rows simultaneously (unrolled)
+                                __m256 sum_vec[UNROLL_M];
+                                for (size_t u = 0; u < UNROLL_M && i + u < i_unroll_end; ++u) {
+                                    sum_vec[u] = _mm256_loadu_ps(&result_data[(i + u) * N + j]);
+                                }
+                                
+                                for (size_t k = k_tile; k < k_end; ++k) {
+                                    __m256 b_vec = _mm256_loadu_ps(&b_data[k * N + j]);
+                                    
+                                    for (size_t u = 0; u < UNROLL_M && i + u < i_unroll_end; ++u) {
+                                        __m256 a_vec = _mm256_broadcast_ss(&a_data[(i + u) * K + k]);
+                                        sum_vec[u] = _mm256_fmadd_ps(a_vec, b_vec, sum_vec[u]);
+                                    }
+                                }
+                                
+                                // Store results
+                                for (size_t u = 0; u < UNROLL_M && i + u < i_unroll_end; ++u) {
+                                    _mm256_storeu_ps(&result_data[(i + u) * N + j], sum_vec[u]);
+                                }
+                            } else {
+                                // Handle remainder elements (scalar fallback)
+                                for (size_t ii = i; ii < i_unroll_end; ++ii) {
+                                    for (size_t jj = j; jj < j_vec_end; ++jj) {
+                                        float sum = result_data[ii * N + jj];
+                                        for (size_t k = k_tile; k < k_end; ++k) {
+                                            sum += a_data[ii * K + k] * b_data[k * N + jj];
+                                        }
+                                        result_data[ii * N + jj] = sum;
+                                    }
                                 }
                             }
                         }
@@ -235,6 +252,53 @@ namespace simd_utils {
                 }
             }
         }
+    }
+    
+    /**
+     * @brief Fast approximation of exp() using AVX2 for 8 floats simultaneously.
+     * @param x Input values (8 floats).
+     * @return Approximate exp(x) values.
+     */
+    __m256 fast_exp_avx2(__m256 x) {
+        // Clamp x to avoid overflow/underflow
+        const __m256 max_x = _mm256_set1_ps(88.0f);
+        const __m256 min_x = _mm256_set1_ps(-88.0f);
+        x = _mm256_max_ps(_mm256_min_ps(x, max_x), min_x);
+        
+        // Use polynomial approximation: exp(x) ≈ 2^(x/ln(2))
+        const __m256 log2e = _mm256_set1_ps(1.44269504f);  // 1/ln(2)
+        const __m256 ln2 = _mm256_set1_ps(0.69314718f);    // ln(2)
+        
+        // Convert to base 2: x = x * log2(e)
+        __m256 x_log2e = _mm256_mul_ps(x, log2e);
+        
+        // Split into integer and fractional parts
+        __m256 fx = _mm256_floor_ps(x_log2e);
+        __m256 x_frac = _mm256_sub_ps(x_log2e, fx);
+        
+        // Convert integer part to actual powers of 2
+        __m256i fx_int = _mm256_cvtps_epi32(fx);
+        __m256i exp_int = _mm256_slli_epi32(_mm256_add_epi32(fx_int, _mm256_set1_epi32(127)), 23);
+        __m256 exp_int_float = _mm256_castsi256_ps(exp_int);
+        
+        // Polynomial approximation for 2^frac (frac in [0,1])
+        // 2^x ≈ 1 + x*ln(2) + x²*ln²(2)/2 + x³*ln³(2)/6 + ...
+        const __m256 c1 = _mm256_set1_ps(0.69314718f);    // ln(2)
+        const __m256 c2 = _mm256_set1_ps(0.24022651f);    // ln²(2)/2
+        const __m256 c3 = _mm256_set1_ps(0.05550410f);    // ln³(2)/6
+        const __m256 c4 = _mm256_set1_ps(0.00961812f);    // ln⁴(2)/24
+        
+        __m256 x_frac_ln2 = _mm256_mul_ps(x_frac, ln2);
+        __m256 poly = _mm256_set1_ps(1.0f);
+        poly = _mm256_fmadd_ps(x_frac_ln2, c1, poly);
+        poly = _mm256_fmadd_ps(_mm256_mul_ps(x_frac_ln2, x_frac_ln2), c2, poly);
+        __m256 x_frac_ln2_3 = _mm256_mul_ps(_mm256_mul_ps(x_frac_ln2, x_frac_ln2), x_frac_ln2);
+        poly = _mm256_fmadd_ps(x_frac_ln2_3, c3, poly);
+        __m256 x_frac_ln2_4 = _mm256_mul_ps(x_frac_ln2_3, x_frac_ln2);
+        poly = _mm256_fmadd_ps(x_frac_ln2_4, c4, poly);
+        
+        // Combine integer and fractional parts
+        return _mm256_mul_ps(exp_int_float, poly);
     }
 
 } // namespace simd_utils
@@ -876,27 +940,100 @@ Tensor TensorEngine::softmax(const Tensor& input, float temperature) {
         size_t last_dim_size = shape.back();
         size_t batch_size = input.shape().total_size() / last_dim_size;
         
+        #pragma omp parallel for if(batch_size > 4)
         for (size_t batch = 0; batch < batch_size; ++batch) {
             size_t offset = batch * last_dim_size;
             
-            // Find max for numerical stability
-            float max_val = input_data[offset];
-            for (size_t i = 1; i < last_dim_size; ++i) {
-                max_val = std::max(max_val, input_data[offset + i]);
+#ifdef TURBOINFER_SIMD_ENABLED
+            // SIMD-optimized softmax for larger sequences
+            if (last_dim_size >= AVX2_FLOAT_COUNT * 2) {
+                // Find max using SIMD
+                __m256 max_vec = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
+                size_t simd_end = (last_dim_size / AVX2_FLOAT_COUNT) * AVX2_FLOAT_COUNT;
+                
+                for (size_t i = 0; i < simd_end; i += AVX2_FLOAT_COUNT) {
+                    __m256 data_vec = _mm256_loadu_ps(&input_data[offset + i]);
+                    max_vec = _mm256_max_ps(max_vec, data_vec);
+                }
+                
+                // Horizontal max reduction
+                float max_val = -std::numeric_limits<float>::infinity();
+                alignas(32) float max_array[AVX2_FLOAT_COUNT];
+                _mm256_store_ps(max_array, max_vec);
+                for (int i = 0; i < AVX2_FLOAT_COUNT; ++i) {
+                    max_val = std::max(max_val, max_array[i]);
+                }
+                
+                // Handle remainder elements
+                for (size_t i = simd_end; i < last_dim_size; ++i) {
+                    max_val = std::max(max_val, input_data[offset + i]);
+                }
+                
+                // Compute exp and sum using SIMD
+                __m256 max_broadcast = _mm256_set1_ps(max_val);
+                __m256 temp_broadcast = _mm256_set1_ps(temperature);
+                __m256 sum_vec = _mm256_setzero_ps();
+                
+                for (size_t i = 0; i < simd_end; i += AVX2_FLOAT_COUNT) {
+                    __m256 data_vec = _mm256_loadu_ps(&input_data[offset + i]);
+                    __m256 normalized = _mm256_div_ps(_mm256_sub_ps(data_vec, max_broadcast), temp_broadcast);
+                    
+                    // Fast exp approximation using SIMD
+                    __m256 exp_val = simd_utils::fast_exp_avx2(normalized);
+                    _mm256_storeu_ps(&result_data[offset + i], exp_val);
+                    sum_vec = _mm256_add_ps(sum_vec, exp_val);
+                }
+                
+                // Horizontal sum reduction
+                float sum = 0.0f;
+                alignas(32) float sum_array[AVX2_FLOAT_COUNT];
+                _mm256_store_ps(sum_array, sum_vec);
+                for (int i = 0; i < AVX2_FLOAT_COUNT; ++i) {
+                    sum += sum_array[i];
+                }
+                
+                // Handle remainder elements
+                for (size_t i = simd_end; i < last_dim_size; ++i) {
+                    float val = std::exp((input_data[offset + i] - max_val) / temperature);
+                    result_data[offset + i] = val;
+                    sum += val;
+                }
+                
+                // Normalize using SIMD
+                __m256 sum_broadcast = _mm256_set1_ps(sum);
+                for (size_t i = 0; i < simd_end; i += AVX2_FLOAT_COUNT) {
+                    __m256 data_vec = _mm256_loadu_ps(&result_data[offset + i]);
+                    __m256 normalized = _mm256_div_ps(data_vec, sum_broadcast);
+                    _mm256_storeu_ps(&result_data[offset + i], normalized);
+                }
+                
+                // Handle remainder elements
+                for (size_t i = simd_end; i < last_dim_size; ++i) {
+                    result_data[offset + i] /= sum;
+                }
+            } else {
+#endif
+                // Scalar fallback for small sequences
+                float max_val = input_data[offset];
+                for (size_t i = 1; i < last_dim_size; ++i) {
+                    max_val = std::max(max_val, input_data[offset + i]);
+                }
+                
+                // Compute exp(x/temperature - max) and sum
+                float sum = 0.0f;
+                for (size_t i = 0; i < last_dim_size; ++i) {
+                    float val = std::exp((input_data[offset + i] - max_val) / temperature);
+                    result_data[offset + i] = val;
+                    sum += val;
+                }
+                
+                // Normalize
+                for (size_t i = 0; i < last_dim_size; ++i) {
+                    result_data[offset + i] /= sum;
+                }
+#ifdef TURBOINFER_SIMD_ENABLED
             }
-            
-            // Compute exp(x/temperature - max) and sum
-            float sum = 0.0f;
-            for (size_t i = 0; i < last_dim_size; ++i) {
-                float val = std::exp((input_data[offset + i] - max_val) / temperature);
-                result_data[offset + i] = val;
-                sum += val;
-            }
-            
-            // Normalize
-            for (size_t i = 0; i < last_dim_size; ++i) {
-                result_data[offset + i] /= sum;
-            }
+#endif
         }
     } else {
         throw std::runtime_error("Softmax currently only supports Float32 data type");
@@ -935,6 +1072,12 @@ Tensor TensorEngine::attention(const Tensor& query, const Tensor& key, const Ten
     
     if (query.dtype() != DataType::kFloat32) {
         throw std::runtime_error("Attention currently only supports Float32 data type");
+    }
+    
+    // Fast path for small sequences (single token inference)
+    if (q_dims.size() == 3 && q_dims[1] == 1 && k_dims.size() == 3) {
+        // Single query token against cached keys/values
+        return attention_fast_incremental(query, key, value, mask);
     }
     
     // For now, assume 3D tensors [batch, seq_len, hidden] and transpose last two dims manually
@@ -1102,6 +1245,142 @@ Tensor TensorEngine::multi_head_attention(const Tensor& query, const Tensor& key
                     result_data[dst_idx] = head_data[src_idx];
                 }
             }
+        }
+    }
+    
+    return result;
+}
+
+Tensor TensorEngine::attention_fast_incremental(const Tensor& query, const Tensor& key, const Tensor& value, const Tensor* mask) {
+    // Optimized attention for single query token against cached key/value tensors
+    // query: [batch_size, 1, hidden_size]
+    // key:   [batch_size, seq_len, hidden_size]  
+    // value: [batch_size, seq_len, hidden_size]
+    
+    const std::vector<size_t>& q_dims = query.shape().dimensions();
+    const std::vector<size_t>& k_dims = key.shape().dimensions();
+    const std::vector<size_t>& v_dims = value.shape().dimensions();
+    
+    if (q_dims.size() != 3 || k_dims.size() != 3 || v_dims.size() != 3) {
+        throw std::runtime_error("Fast incremental attention requires 3D tensors");
+    }
+    
+    if (q_dims[1] != 1) {
+        throw std::runtime_error("Fast incremental attention requires single query token (seq_len=1)");
+    }
+    
+    size_t batch_size = q_dims[0];
+    size_t hidden_size = q_dims[2];
+    size_t kv_seq_len = k_dims[1];
+    
+    if (query.dtype() != DataType::kFloat32) {
+        throw std::runtime_error("Fast incremental attention currently only supports Float32");
+    }
+    
+    const float* q_data = query.data_ptr<float>();
+    const float* k_data = key.data_ptr<float>();
+    const float* v_data = value.data_ptr<float>();
+    
+    // Output tensor: [batch_size, 1, hidden_size]
+    Tensor result(TensorShape({batch_size, 1, hidden_size}), query.dtype());
+    float* result_data = result.data_ptr<float>();
+    
+    float scale = 1.0f / std::sqrt(static_cast<float>(hidden_size));
+    
+    #pragma omp parallel for if(batch_size > 1)
+    for (size_t b = 0; b < batch_size; ++b) {
+        // Compute attention scores for single query against all cached keys
+        std::vector<float> scores(kv_seq_len);
+        
+        for (size_t k_pos = 0; k_pos < kv_seq_len; ++k_pos) {
+            float score = 0.0f;
+            
+#ifdef TURBOINFER_SIMD_ENABLED
+            // SIMD dot product for query-key attention score
+            size_t simd_end = (hidden_size / AVX2_FLOAT_COUNT) * AVX2_FLOAT_COUNT;
+            __m256 sum_vec = _mm256_setzero_ps();
+            
+            for (size_t h = 0; h < simd_end; h += AVX2_FLOAT_COUNT) {
+                __m256 q_vec = _mm256_loadu_ps(&q_data[b * hidden_size + h]);
+                __m256 k_vec = _mm256_loadu_ps(&k_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h]);
+                sum_vec = _mm256_fmadd_ps(q_vec, k_vec, sum_vec);
+            }
+            
+            // Horizontal sum
+            alignas(32) float sum_array[AVX2_FLOAT_COUNT];
+            _mm256_store_ps(sum_array, sum_vec);
+            for (int i = 0; i < AVX2_FLOAT_COUNT; ++i) {
+                score += sum_array[i];
+            }
+            
+            // Handle remainder
+            for (size_t h = simd_end; h < hidden_size; ++h) {
+                score += q_data[b * hidden_size + h] * k_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h];
+            }
+#else
+            // Scalar dot product
+            for (size_t h = 0; h < hidden_size; ++h) {
+                score += q_data[b * hidden_size + h] * k_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h];
+            }
+#endif
+            scores[k_pos] = score * scale;
+        }
+        
+        // Apply softmax to scores
+        float max_score = *std::max_element(scores.begin(), scores.end());
+        float sum_exp = 0.0f;
+        
+        for (size_t k_pos = 0; k_pos < kv_seq_len; ++k_pos) {
+            scores[k_pos] = std::exp(scores[k_pos] - max_score);
+            sum_exp += scores[k_pos];
+        }
+        
+        for (size_t k_pos = 0; k_pos < kv_seq_len; ++k_pos) {
+            scores[k_pos] /= sum_exp;
+        }
+        
+        // Compute weighted sum of values using attention weights
+        for (size_t h = 0; h < hidden_size; ++h) {
+            float output_val = 0.0f;
+            
+#ifdef TURBOINFER_SIMD_ENABLED
+            // SIMD weighted sum
+            size_t simd_kv_end = (kv_seq_len / AVX2_FLOAT_COUNT) * AVX2_FLOAT_COUNT;
+            __m256 sum_vec = _mm256_setzero_ps();
+            
+            for (size_t k_pos = 0; k_pos < simd_kv_end; k_pos += AVX2_FLOAT_COUNT) {
+                __m256 weight_vec = _mm256_loadu_ps(&scores[k_pos]);
+                __m256 value_vec = _mm256_set_ps(
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 7) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 6) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 5) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 4) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 3) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 2) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + (k_pos + 1) * hidden_size + h],
+                    v_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h]
+                );
+                sum_vec = _mm256_fmadd_ps(weight_vec, value_vec, sum_vec);
+            }
+            
+            // Horizontal sum
+            alignas(32) float sum_array[AVX2_FLOAT_COUNT];
+            _mm256_store_ps(sum_array, sum_vec);
+            for (int i = 0; i < AVX2_FLOAT_COUNT; ++i) {
+                output_val += sum_array[i];
+            }
+            
+            // Handle remainder
+            for (size_t k_pos = simd_kv_end; k_pos < kv_seq_len; ++k_pos) {
+                output_val += scores[k_pos] * v_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h];
+            }
+#else
+            // Scalar weighted sum
+            for (size_t k_pos = 0; k_pos < kv_seq_len; ++k_pos) {
+                output_val += scores[k_pos] * v_data[b * kv_seq_len * hidden_size + k_pos * hidden_size + h];
+            }
+#endif
+            result_data[b * hidden_size + h] = output_val;
         }
     }
     

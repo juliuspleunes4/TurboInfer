@@ -319,6 +319,31 @@ private:
             v = std::move(cached_kv.second);
         }
         
+        // Check if we can use fast incremental attention (single token query)
+        if (seq_len == 1 && k.shape().size(0) > 1) {
+            // Fast path for single token generation against cached KV
+            // Reshape tensors to [batch_size=1, seq_len, hidden_size] format expected by attention_fast_incremental
+            core::TensorShape q_3d_shape({1, 1, hidden_size});
+            core::TensorShape kv_3d_shape({1, k.shape().size(0), hidden_size});
+            
+            core::Tensor q_3d = q.reshape(q_3d_shape);
+            core::Tensor k_3d = k.reshape(kv_3d_shape);
+            core::Tensor v_3d = v.reshape(kv_3d_shape);
+            
+            // Use fast incremental attention
+            core::Tensor attn_output_3d = engine.attention_fast_incremental(q_3d, k_3d, v_3d);
+            
+            // Reshape back to [seq_len=1, hidden_size]
+            core::TensorShape output_2d_shape({1, hidden_size});
+            core::Tensor attn_output = attn_output_3d.reshape(output_2d_shape);
+            
+            // Output projection
+            core::Tensor output = engine.matmul(attn_output, *o_proj);
+            return output;
+        }
+        
+        // Standard attention path for multi-token sequences
+        
         // Compute attention scores: Q @ K^T
         core::Tensor k_transposed = engine.transpose(k);
         core::Tensor scores = engine.matmul(q, k_transposed);
