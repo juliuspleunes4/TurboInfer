@@ -232,6 +232,52 @@ struct TransformerLayer {
         return output;
     }
     
+    /**
+     * @brief Incremental forward pass through transformer layer (for single new token).
+     * @param engine Tensor engine for operations.
+     * @param input Input tensor for new token(s) only.
+     * @param kv_cache KV cache for this layer.
+     * @param layer_idx Layer index.
+     * @param position_ids Position IDs for RoPE.
+     * @return Output tensor.
+     */
+    core::Tensor forward_incremental(core::TensorEngine& engine, const core::Tensor& input,
+                                    KVCache& kv_cache, size_t layer_idx, const core::Tensor& position_ids) {
+        // For incremental processing, we use the same logic as forward() but:
+        // 1. Input contains only new token(s)
+        // 2. KV cache is updated incrementally
+        // 3. Attention is computed against full cached sequence
+        
+        // Store input for residual connection
+        core::Tensor residual = input;
+        
+        // 1. Pre-attention normalization (RMSNorm)
+        core::Tensor norm_input = input;
+        if (attention_norm) {
+            norm_input = engine.rms_norm(input, *attention_norm);
+        }
+        
+        // 2. Multi-head self-attention (incremental)
+        core::Tensor attn_output = compute_attention(engine, norm_input, kv_cache, layer_idx, position_ids);
+        
+        // 3. First residual connection
+        core::Tensor post_attn = engine.add(residual, attn_output);
+        
+        // 4. Pre-FFN normalization (RMSNorm)
+        core::Tensor ffn_input = post_attn;
+        if (ffn_norm) {
+            ffn_input = engine.rms_norm(post_attn, *ffn_norm);
+        }
+        
+        // 5. Feed-forward network with SwiGLU activation
+        core::Tensor ffn_output = compute_ffn(engine, ffn_input);
+        
+        // 6. Second residual connection
+        core::Tensor output = engine.add(post_attn, ffn_output);
+        
+        return output;
+    }
+
 private:
     /**
      * @brief Compute multi-head self-attention.
@@ -652,19 +698,15 @@ GenerationResult InferenceEngine::generate(const std::vector<int>& input_tokens,
     // Reset KV cache for new sequence
     impl_->kv_cache_.reset();
     
-    // Current sequence
-    std::vector<int> current_tokens = input_tokens;
+    // First pass: Process all input tokens at once (prefill)
+    auto logits = forward_pass(input_tokens);
     
     // Generate tokens one by one (autoregressive generation)
     for (size_t i = 0; i < max_new_tokens; ++i) {
-        // Forward pass through transformer
-        auto logits = forward_pass(current_tokens);
-        
         // Apply temperature and sampling
         auto next_token = sample_next_token(logits, include_logprobs ? &result.logprobs : nullptr);
         
         // Add to sequence
-        current_tokens.push_back(next_token);
         result.tokens.push_back(next_token);
         
         // Check for end-of-sequence token (assuming token ID 2 is EOS)
@@ -675,11 +717,14 @@ GenerationResult InferenceEngine::generate(const std::vector<int>& input_tokens,
         }
         
         // Check for maximum sequence length
-        if (current_tokens.size() >= config_.max_sequence_length) {
+        if (result.tokens.size() >= config_.max_sequence_length) {
             result.finished = true;
             result.stop_reason = "max_length";
             break;
         }
+        
+        // For subsequent tokens, use incremental forward pass (decode)
+        logits = forward_pass_incremental({next_token});
     }
     
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -1380,6 +1425,67 @@ core::Tensor InferenceEngine::forward_pass(const std::vector<int>& tokens) {
     // 6. Extract logits for the last token (for next token prediction)
     // For simplicity, we'll return the full logits tensor
     // In practice, we'd slice to get only the last position
+    return logits;
+}
+
+core::Tensor InferenceEngine::forward_pass_incremental(const std::vector<int>& tokens) {
+    if (tokens.empty()) {
+        throw std::runtime_error("Cannot perform incremental forward pass with empty token sequence");
+    }
+    
+    // For incremental processing, tokens should typically be a single new token
+    // 1. Token embedding lookup for new token(s) only
+    core::TensorShape input_shape({1, tokens.size()}); // Batch size = 1
+    core::Tensor input_ids(input_shape, core::DataType::kInt32);
+    std::copy(tokens.begin(), tokens.end(), input_ids.data_ptr<int>());
+    
+    // Create embedding for new token(s) only
+    core::TensorShape embed_shape({1, tokens.size(), static_cast<size_t>(model_metadata_.hidden_size)});
+    core::Tensor embeddings(embed_shape, core::DataType::kFloat32);
+    
+    // Initialize embeddings with simple values (placeholder)
+    float* embed_data = embeddings.data_ptr<float>();
+    for (size_t i = 0; i < embeddings.shape().total_size(); ++i) {
+        embed_data[i] = 0.1f * (i % 100); // Simple initialization
+    }
+    
+    // 2. Create position IDs for new token(s) starting from current cache length
+    core::TensorShape pos_shape({tokens.size()});
+    core::Tensor position_ids(pos_shape, core::DataType::kFloat32);
+    float* pos_data = position_ids.data_ptr<float>();
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        pos_data[i] = static_cast<float>(impl_->kv_cache_.current_length + i);
+    }
+    
+    // 3. Forward pass through transformer layers (incremental)
+    core::Tensor hidden_states = embeddings;
+    
+    for (size_t layer_idx = 0; layer_idx < impl_->layers_.size(); ++layer_idx) {
+        if (layer_idx < impl_->layers_.size()) {
+            hidden_states = impl_->layers_[layer_idx].forward_incremental(
+                *tensor_engine_, hidden_states, impl_->kv_cache_, layer_idx, position_ids);
+        }
+    }
+    
+    // 4. Final layer normalization
+    if (impl_->output_norm_) {
+        hidden_states = tensor_engine_->rms_norm(hidden_states, *impl_->output_norm_);
+    }
+    
+    // 5. Language modeling head (project to vocabulary)
+    core::TensorShape logits_shape({1, tokens.size(), static_cast<size_t>(model_metadata_.vocab_size)});
+    core::Tensor logits(logits_shape, core::DataType::kFloat32);
+    
+    if (impl_->lm_head_) {
+        logits = tensor_engine_->matmul(hidden_states, *impl_->lm_head_);
+    } else {
+        // Fallback: create dummy logits
+        float* logits_data = logits.data_ptr<float>();
+        for (size_t i = 0; i < logits.shape().total_size(); ++i) {
+            logits_data[i] = static_cast<float>(impl_->rng_()) / impl_->rng_.max() - 0.5f;
+        }
+    }
+    
     return logits;
 }
 

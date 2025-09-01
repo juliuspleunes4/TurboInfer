@@ -248,6 +248,13 @@ private:
     core::Tensor forward_pass(const std::vector<int>& tokens);
 
     /**
+     * @brief Incremental forward pass for single token (uses KV cache).
+     * @param tokens New token(s) to process (typically single token).
+     * @return Logits tensor for next token prediction.
+     */
+    core::Tensor forward_pass_incremental(const std::vector<int>& tokens);
+
+    /**
      * @brief Sample next token from logits using configured sampling strategy.
      * @param logits Output logits from model.
      * @param logprobs Optional pointer to store log probabilities.

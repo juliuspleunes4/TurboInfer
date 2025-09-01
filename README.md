@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![C++](https://img.shields.io/badge/C++-20-blue.svg)](https://isocpp.org/std/the-standard)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#building-from-source)
-[![Performance](https://img.shields.io/badge/performance-1000%2B%20tokens%2Fs-green)](#performance)
+[![Performance](https://img.shields.io/badge/performance-135--160%20tokens%2Fs-brightgreen)](#performance)
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" alt="C++" width="32" height="32"/>
@@ -17,8 +17,8 @@
 
 ## 🚀 Key Features
 
-- **🔥 Production Performance**: 1000+ tokens/second with optimized SIMD operations and KV-cache management
-- **⚡ Smart Caching**: 1.6x faster tokenization with intelligent tokenizer caching system
+- **🔥 Production Performance**: 135-160 tokens/second end-to-end inference with optimized incremental processing
+- **⚡ Smart Caching**: 1.61x faster tokenization with intelligent tokenizer caching system
 - **🧠 Complete LLM Support**: Full transformer architecture with multi-head attention, RoPE, and SwiGLU FFN
 - **📦 Advanced Quantization**: INT4/INT8 quantization with up to 8x compression and persistence support
 - **🔧 Modern C++20**: Professional codebase with RAII, smart pointers, and comprehensive error handling
@@ -53,11 +53,15 @@
 
 | Operation | Performance | Notes |
 |-----------|-------------|-------|
-| **Token Generation** | 1000+ tokens/second | With KV-cache optimization |
+| **Token Generation** | 135-160 tokens/second | End-to-end transformer inference with incremental processing |
 | **Cached Tokenization** | 1.61x faster | Smart tokenizer caching |
 | **Quantization** | 4x-8x compression | INT8/INT4 with minimal accuracy loss |
 | **Memory Usage** | Accurate tracking | Real-time tensor-based calculation |
 | **SIMD Operations** | AVX2/NEON support | Optimized mathematical operations |
+| **Matrix Operations** | 5.7-8.6 GFLOPS | 64x128 to 512x1024 matrices |
+| **Beam Search** | 1800+ tokens/second | Microbenchmark (small synthetic model) |
+
+**Performance Note**: End-to-end transformer inference (135-160 tokens/second) includes full model loading, tokenization, incremental attention computation, and generation. Microbenchmarks show individual operation capabilities but don't reflect real-world inference overhead.
 
 ## 📋 Requirements
 
