@@ -210,5 +210,43 @@ void quantize_model_file(const std::string& input_path,
                         const std::string& output_path,
                         const QuantizationConfig& config = QuantizationConfig{});
 
+// Helper functions for quantization algorithms (internal use)
+
+/**
+ * @brief Quantizes float array to int8.
+ * @param input Input float array.
+ * @param output Output int8 array.
+ * @param count Number of elements.
+ * @param info Quantization parameters.
+ */
+void quantize_to_int8(const float* input, int8_t* output, size_t count, const QuantizationInfo& info);
+
+/**
+ * @brief Quantizes float array to int4 (stored as int32).
+ * @param input Input float array.
+ * @param output Output int32 array (stores int4 values).
+ * @param count Number of elements.
+ * @param info Quantization parameters.
+ */
+void quantize_to_int4(const float* input, int32_t* output, size_t count, const QuantizationInfo& info);
+
+/**
+ * @brief Dequantizes int8 array to float.
+ * @param input Input int8 array.
+ * @param output Output float array.
+ * @param count Number of elements.
+ * @param info Quantization parameters.
+ */
+void dequantize_from_int8(const int8_t* input, float* output, size_t count, const QuantizationInfo& info);
+
+/**
+ * @brief Dequantizes int4 array (stored as int32) to float.
+ * @param input Input int32 array (contains int4 values).
+ * @param output Output float array.
+ * @param count Number of elements.
+ * @param info Quantization parameters.
+ */
+void dequantize_from_int4(const int32_t* input, float* output, size_t count, const QuantizationInfo& info);
+
 } // namespace optimize
 } // namespace turboinfer
