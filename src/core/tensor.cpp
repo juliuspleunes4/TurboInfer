@@ -173,28 +173,88 @@ Tensor Tensor::slice(const std::vector<size_t>& start, const std::vector<size_t>
     TensorShape new_shape(new_dims);
     Tensor result(new_shape, dtype_);
     
-    // For simplicity, this is a basic implementation
-    // A full implementation would need to handle strided access efficiently
+    // Optimized multi-dimensional slicing implementation
     if (!empty() && !result.empty()) {
-        // This is a simplified slice implementation for 2D tensors
-        // A complete implementation would handle arbitrary dimensions
-        if (shape_.ndim() == 2) {
-            const uint8_t* src = static_cast<const uint8_t*>(data());
-            uint8_t* dst = static_cast<uint8_t*>(result.data());
-            
-            size_t elem_size = element_size();
+        const uint8_t* src = static_cast<const uint8_t*>(data());
+        uint8_t* dst = static_cast<uint8_t*>(result.data());
+        size_t elem_size = element_size();
+        
+        // Fast path for contiguous 1D slicing
+        if (shape_.ndim() == 1) {
+            size_t copy_size = (end[0] - start[0]) * elem_size;
+            std::memcpy(dst, src + start[0] * elem_size, copy_size);
+        }
+        // Optimized 2D slicing with row-wise copy
+        else if (shape_.ndim() == 2) {
             size_t src_row_size = shape_.size(1) * elem_size;
-            size_t dst_row_size = new_shape.size(1) * elem_size;
             size_t copy_size = (end[1] - start[1]) * elem_size;
             
             for (size_t row = 0; row < new_shape.size(0); ++row) {
                 const uint8_t* src_row = src + (start[0] + row) * src_row_size + start[1] * elem_size;
-                uint8_t* dst_row = dst + row * dst_row_size;
+                uint8_t* dst_row = dst + row * copy_size;
                 std::memcpy(dst_row, src_row, copy_size);
             }
-        } else {
-            throw std::runtime_error("Slice operation not yet implemented for tensors with " + 
-                                   std::to_string(shape_.ndim()) + " dimensions");
+        }
+        // Optimized 3D slicing with plane-wise copy
+        else if (shape_.ndim() == 3) {
+            size_t src_plane_size = shape_.size(1) * shape_.size(2) * elem_size;
+            size_t src_row_size = shape_.size(2) * elem_size;
+            size_t dst_row_size = (end[2] - start[2]) * elem_size;
+            size_t copy_size = dst_row_size;
+            
+            for (size_t plane = 0; plane < new_shape.size(0); ++plane) {
+                for (size_t row = 0; row < new_shape.size(1); ++row) {
+                    const uint8_t* src_pos = src + (start[0] + plane) * src_plane_size 
+                                                + (start[1] + row) * src_row_size 
+                                                + start[2] * elem_size;
+                    uint8_t* dst_pos = dst + plane * new_shape.size(1) * dst_row_size 
+                                           + row * dst_row_size;
+                    std::memcpy(dst_pos, src_pos, copy_size);
+                }
+            }
+        }
+        // Generic N-dimensional slicing for higher dimensions
+        else {
+            // Pre-calculate strides for efficient coordinate conversion
+            std::vector<size_t> src_strides(shape_.ndim());
+            std::vector<size_t> dst_strides(new_shape.ndim());
+            
+            // Calculate source strides
+            src_strides[shape_.ndim() - 1] = elem_size;
+            for (int i = static_cast<int>(shape_.ndim()) - 2; i >= 0; --i) {
+                src_strides[i] = src_strides[i + 1] * shape_.size(i + 1);
+            }
+            
+            // Calculate destination strides
+            dst_strides[new_shape.ndim() - 1] = elem_size;
+            for (int i = static_cast<int>(new_shape.ndim()) - 2; i >= 0; --i) {
+                dst_strides[i] = dst_strides[i + 1] * new_shape.size(i + 1);
+            }
+            
+            // For efficiency, try to find contiguous chunks to copy
+            size_t total_elements = new_shape.total_size();
+            std::vector<size_t> dst_coords(new_shape.ndim());
+            
+            for (size_t dst_linear = 0; dst_linear < total_elements; ++dst_linear) {
+                // Convert linear index to coordinates
+                size_t temp = dst_linear;
+                for (size_t dim = 0; dim < new_shape.ndim(); ++dim) {
+                    size_t stride_elements = dst_strides[dim] / elem_size;
+                    dst_coords[dim] = temp / stride_elements;
+                    temp %= stride_elements;
+                }
+                
+                // Calculate source offset
+                size_t src_offset = 0;
+                for (size_t dim = 0; dim < shape_.ndim(); ++dim) {
+                    src_offset += (start[dim] + dst_coords[dim]) * (src_strides[dim] / elem_size);
+                }
+                
+                // Copy element
+                std::memcpy(dst + dst_linear * elem_size, 
+                           src + src_offset * elem_size, 
+                           elem_size);
+            }
         }
     }
     

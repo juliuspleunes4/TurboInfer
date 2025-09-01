@@ -154,6 +154,9 @@ Exceptional documentation is critical for an open-source project. Every file, cl
 - **Error Avoidance**:
   - Ensure generated code compiles without errors under C++20 with GCC/Clang.
   - Avoid suggesting dependencies outside the approved list (Eigen, Cereal, GoogleTest).
+- **Test files**: 
+  - Include test files in `tests/` for all new features and bug fixes.
+  - Make sure the .exe variant is in the `tests/exe/` directory.
 
 ## Testing and Validation
 

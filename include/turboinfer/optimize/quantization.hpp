@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <cstddef>
+#include <cstdint>
 
 namespace turboinfer {
 namespace optimize {
@@ -175,6 +176,27 @@ private:
      */
     std::vector<uint8_t> apply_quantization(const core::Tensor& input, 
                                            const QuantizationInfo& info);
+    
+    /**
+     * @brief Helper function to write strings to binary files.
+     * @param file Output file stream.
+     * @param str String to write.
+     */
+    static void write_string(std::ofstream& file, const std::string& str);
+    
+    /**
+     * @brief Helper function to read strings from binary files.
+     * @param file Input file stream.
+     * @return Read string.
+     */
+    static std::string read_string(std::ifstream& file);
+    
+    /**
+     * @brief Calculate quantization info for a saved tensor.
+     * @param tensor Quantized tensor.
+     * @return Quantization information.
+     */
+    QuantizationInfo calculate_quantization_info_for_saved_tensor(const core::Tensor& tensor);
 };
 
 /**

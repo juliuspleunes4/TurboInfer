@@ -10,6 +10,7 @@
 #include <memory>
 #include <initializer_list>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 
 namespace turboinfer {

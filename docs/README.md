@@ -6,12 +6,7 @@ Welcome to the TurboInfer documentation! This directory contains comprehensive g
 
 ### **Core Documentation**
 - **[Project README](../README.md)** - Main project overview and quick start
-- **[Development Guide](development.md)** - Development setup and guidelines
 - **[API Reference](api/)** - Detailed API documentation *(coming soon)*
-
-### **Implementation Tracking**
-- **[Incomplete Features](implementation/INCOMPLETE_FEATURES.md)** - Comprehensive tracking of unfinished implementations
-- **[Project Status](status/)** - Current development status and milestones
 
 ### **Guides & Tutorials**
 - **[Quick Start Guide](guides/quickstart.md)** - Get started with TurboInfer *(coming soon)*
@@ -49,7 +44,7 @@ Welcome to the TurboInfer documentation! This directory contains comprehensive g
 ### **Architecture Overview**
 ```
 TurboInfer/
-├── include/turboinfer/          # Public API headers
+├── include/turboinfer/         # Public API headers
 │   ├── core/                   # Core tensor operations
 │   ├── model/                  # Model loading and inference  
 │   ├── optimize/               # Quantization and optimization
@@ -93,8 +88,6 @@ While TurboInfer is **production-ready**, there are optional enhancements tracke
 - Enhanced tokenization (BPE/SentencePiece support)
 - Advanced transformer layer implementations
 - Expanded test coverage
-
-See **[Incomplete Features](implementation/INCOMPLETE_FEATURES.md)** for detailed tracking and implementation plans.
 
 ---
 

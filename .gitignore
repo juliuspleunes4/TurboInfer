@@ -155,3 +155,6 @@ Makefile
 # Backup files
 *.bak
 *.backup
+
+# Temp file
+todo.md

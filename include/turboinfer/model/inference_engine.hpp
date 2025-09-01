@@ -13,6 +13,7 @@
 #include <string>
 #include <memory>
 #include <cstddef>
+#include <unordered_map>
 
 namespace turboinfer {
 namespace model {
@@ -27,6 +28,8 @@ struct InferenceConfig {
     float temperature = 1.0f;              ///< Sampling temperature
     float top_p = 0.9f;                    ///< Top-p sampling threshold
     size_t top_k = 50;                     ///< Top-k sampling limit
+    float length_penalty = 1.0f;           ///< Length penalty for beam search
+    int eos_token_id = 2;                  ///< End-of-sequence token ID
     bool use_cache = true;                 ///< Enable KV cache for efficiency
     core::ComputeDevice device = core::ComputeDevice::kAuto; ///< Compute device
 };
@@ -231,11 +234,25 @@ private:
     void validate_batch_size(size_t batch_size) const;
 
     /**
+     * @brief Calculate memory usage of a single tensor.
+     * @param tensor The tensor to calculate memory for.
+     * @return Memory usage in bytes.
+     */
+    size_t calculate_tensor_memory(const core::Tensor& tensor) const;
+
+    /**
      * @brief Forward pass through the transformer model.
      * @param tokens Input token sequence.
      * @return Logits tensor for next token prediction.
      */
     core::Tensor forward_pass(const std::vector<int>& tokens);
+
+    /**
+     * @brief Incremental forward pass for single token (uses KV cache).
+     * @param tokens New token(s) to process (typically single token).
+     * @return Logits tensor for next token prediction.
+     */
+    core::Tensor forward_pass_incremental(const std::vector<int>& tokens);
 
     /**
      * @brief Sample next token from logits using configured sampling strategy.
@@ -269,6 +286,64 @@ private:
      */
     core::Tensor apply_top_p(const core::Tensor& logits, float p);
 
+    // Enhanced tokenization helper functions
+    
+    /**
+     * @brief Initialize vocabulary mappings for BPE tokenization.
+     */
+    void initialize_vocabulary();
+    
+    /**
+     * @brief Split text into words for tokenization.
+     * @param text Input text.
+     * @return Vector of words.
+     */
+    std::vector<std::string> split_text_into_words(const std::string& text);
+    
+    /**
+     * @brief Encode a single word using BPE.
+     * @param word Input word.
+     * @return Vector of token IDs.
+     */
+    std::vector<int> encode_word_bpe(const std::string& word);
+    
+    /**
+     * @brief Check if a string is punctuation.
+     * @param str Input string.
+     * @return True if punctuation.
+     */
+    bool is_punctuation(const std::string& str);
+    
+    // Vocabulary mappings
+    std::unordered_map<std::string, int> vocab_map_;     ///< Token to ID mapping
+    std::unordered_map<int, std::string> id_to_token_;   ///< ID to token mapping
+    std::vector<std::pair<std::string, std::string>> bpe_merges_; ///< BPE merge rules
+
+    // Beam search helper functions
+    
+    /**
+     * @brief Convert logits to probabilities using softmax.
+     * @param logits Input logits vector.
+     * @return Probability distribution.
+     */
+    std::vector<float> softmax(const std::vector<float>& logits);
+    
+    /**
+     * @brief Apply top-k filtering to probabilities.
+     * @param probs Input probabilities.
+     * @param k Number of top tokens to keep.
+     * @return Filtered probabilities.
+     */
+    std::vector<float> apply_top_k_filtering(const std::vector<float>& probs, size_t k);
+    
+    /**
+     * @brief Apply top-p (nucleus) filtering to probabilities.
+     * @param probs Input probabilities.
+     * @param p Cumulative probability threshold.
+     * @return Filtered probabilities.
+     */
+    std::vector<float> apply_top_p_filtering(const std::vector<float>& probs, float p);
+
     /**
      * @brief Beam search helper structure for maintaining candidate sequences.
      */
@@ -276,6 +351,7 @@ private:
         std::vector<int> tokens;
         float score;
         float log_prob;
+        float normalized_score = 0.0f;  ///< Length-normalized score for ranking
         bool finished;
         
         BeamCandidate(const std::vector<int>& initial_tokens = {})

@@ -139,6 +139,17 @@ public:
                     const Tensor* mask = nullptr);
 
     /**
+     * @brief Fast incremental attention for single query token.
+     * @param query Single query token (batch_size, 1, hidden_size).
+     * @param key Cached key tensor (batch_size, seq_len, hidden_size).
+     * @param value Cached value tensor (batch_size, seq_len, hidden_size).
+     * @param mask Optional attention mask.
+     * @return Attention output tensor (batch_size, 1, hidden_size).
+     */
+    Tensor attention_fast_incremental(const Tensor& query, const Tensor& key, const Tensor& value,
+                                     const Tensor* mask = nullptr);
+
+    /**
      * @brief Computes multi-head attention.
      * @param query Query tensor (batch_size, seq_len, hidden_size).
      * @param key Key tensor (batch_size, seq_len, hidden_size).

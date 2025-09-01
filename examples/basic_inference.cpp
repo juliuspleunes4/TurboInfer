@@ -44,7 +44,8 @@ int main(int argc, char* argv[]) {
 
         // Create inference engine
         std::cout << "Loading model..." << std::endl;
-        auto engine = turboinfer::create_engine(model_path, config);
+        // Create inference engine
+        auto engine = turboinfer::model::create_engine(model_path, config);
 
         // Display model information
         const auto& metadata = engine->model_metadata();

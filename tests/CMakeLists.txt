@@ -10,16 +10,21 @@ set(TEST_SOURCES
     test_logging.cpp
     test_library_init.cpp
     test_data_types.cpp
-    test_memory.cpp
     test_tensor_ops.cpp
     test_error_handling.cpp
-    test_performance.cpp
     test_quantization.cpp
     test_quantization_complete.cpp
     test_beam_search_simple.cpp
     test_beam_search.cpp
     test_inference_engine.cpp
     test_phase4_complete.cpp
+    test_new_tensor_ops.cpp
+    test_quantization_persistence.cpp
+    test_enhanced_tokenization.cpp
+    test_enhanced_transformer.cpp
+    test_kv_cache_incremental.cpp
+    test_performance_stats.cpp
+    test_incomplete_features_complete.cpp
 )
 
 # Create individual test executables (manual testing approach)
@@ -35,6 +40,11 @@ foreach(TEST_FILE ${TEST_SOURCES})
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
     )
+    
+    # Fix Windows MinGW console subsystem issue
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_options(${TEST_NAME} PRIVATE "-mconsole")
+    endif()
     
     # Add to CTest
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})

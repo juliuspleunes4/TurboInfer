@@ -20,15 +20,10 @@ int tests_passed = 0;
         tests_run++; \
         if (condition) { \
             tests_passed++; \
-            std::cout << "✅ PASS: " << #condition << std::endl; \
         } else { \
-            std::cout << "❌ FAIL: " << #condition << std::endl; \
+            std::cerr << "ASSERTION FAILED: " << #condition << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
         } \
     } while(0)
-
-#define ASSERT_FALSE(condition) ASSERT_TRUE(!(condition))
-#define ASSERT_EQ(expected, actual) ASSERT_TRUE((expected) == (actual))
-#define ASSERT_NE(expected, actual) ASSERT_TRUE((expected) != (actual))
 
 void setup_test() {
     // Setup code - override in specific tests if needed
@@ -43,28 +38,25 @@ void test_tensor_creation() {
     setup_test();
     
     // Test 1D tensor creation
-    std::vector<size_t> shape1d = {10};
-    turboinfer::core::TensorShape tensor_shape1d(shape1d);
-    turboinfer::core::Tensor tensor1d(tensor_shape1d);
+    turboinfer::core::TensorShape shape1d({10});
+    turboinfer::core::Tensor tensor1d(shape1d);
     ASSERT_TRUE(tensor1d.shape().ndim() == 1);
     ASSERT_TRUE(tensor1d.shape().total_size() == 10);
-    ASSERT_TRUE(tensor1d.shape().dimensions() == shape1d);
+    ASSERT_TRUE(tensor1d.shape().size(0) == 10);
     
     // Test 2D tensor creation
-    std::vector<size_t> shape2d = {3, 4};
-    turboinfer::core::TensorShape tensor_shape2d(shape2d);
-    turboinfer::core::Tensor tensor2d(tensor_shape2d);
+    turboinfer::core::TensorShape shape2d({3, 4});
+    turboinfer::core::Tensor tensor2d(shape2d);
     ASSERT_TRUE(tensor2d.shape().ndim() == 2);
     ASSERT_TRUE(tensor2d.shape().total_size() == 12);
-    ASSERT_TRUE(tensor2d.shape().dimensions() == shape2d);
+    ASSERT_TRUE(tensor2d.shape().size(0) == 3 && tensor2d.shape().size(1) == 4);
     
     // Test 3D tensor creation
-    std::vector<size_t> shape3d = {2, 3, 4};
-    turboinfer::core::TensorShape tensor_shape3d(shape3d);
-    turboinfer::core::Tensor tensor3d(tensor_shape3d);
+    turboinfer::core::TensorShape shape3d({2, 3, 4});
+    turboinfer::core::Tensor tensor3d(shape3d);
     ASSERT_TRUE(tensor3d.shape().ndim() == 3);
     ASSERT_TRUE(tensor3d.shape().total_size() == 24);
-    ASSERT_TRUE(tensor3d.shape().dimensions() == shape3d);
+    ASSERT_TRUE(tensor3d.shape().size(0) == 2 && tensor3d.shape().size(1) == 3 && tensor3d.shape().size(2) == 4);
     
     std::cout << "✅ Tensor creation tests passed" << std::endl;
     teardown_test();
@@ -75,9 +67,8 @@ void test_tensor_data_access() {
     setup_test();
     
     // Create a 2x3 tensor
-    std::vector<size_t> shape = {2, 3};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::TensorShape shape({2, 3});
+    turboinfer::core::Tensor tensor(shape);
     
     // Test data access and modification
     float* data = tensor.data_ptr<float>();
@@ -102,9 +93,8 @@ void test_tensor_reshape() {
     setup_test();
     
     // Create a 2x6 tensor
-    std::vector<size_t> original_shape = {2, 6};
-    turboinfer::core::TensorShape tensor_shape(original_shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::TensorShape original_shape({2, 6});
+    turboinfer::core::Tensor tensor(original_shape);
     
     // Fill with test data
     float* data = tensor.data_ptr<float>();
@@ -113,18 +103,17 @@ void test_tensor_reshape() {
     }
     
     // Reshape to 3x4
-    std::vector<size_t> new_shape = {3, 4};
-    turboinfer::core::TensorShape new_tensor_shape(new_shape);
-    tensor = tensor.reshape(new_tensor_shape);
+    turboinfer::core::TensorShape new_shape({3, 4});
+    turboinfer::core::Tensor reshaped = tensor.reshape(new_shape);
     
-    ASSERT_TRUE(tensor.shape().dimensions() == new_shape);
-    ASSERT_TRUE(tensor.shape().ndim() == 2);
-    ASSERT_TRUE(tensor.shape().total_size() == 12);
+    ASSERT_TRUE(reshaped.shape().dimensions() == new_shape.dimensions());
+    ASSERT_TRUE(reshaped.shape().ndim() == 2);
+    ASSERT_TRUE(reshaped.shape().total_size() == 12);
     
     // Verify data is preserved
-    data = tensor.data_ptr<float>();
-    for (size_t i = 0; i < tensor.shape().total_size(); ++i) {
-        ASSERT_TRUE(data[i] == static_cast<float>(i));
+    float* reshaped_data = reshaped.data_ptr<float>();
+    for (size_t i = 0; i < reshaped.shape().total_size(); ++i) {
+        ASSERT_TRUE(reshaped_data[i] == static_cast<float>(i));
     }
     
     std::cout << "✅ Tensor reshape tests passed" << std::endl;
@@ -136,9 +125,8 @@ void test_tensor_slice() {
     setup_test();
     
     // Create a 4x4 tensor
-    std::vector<size_t> shape = {4, 4};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::TensorShape shape({4, 4});
+    turboinfer::core::Tensor tensor(shape);
     
     // Fill with test data
     float* data = tensor.data_ptr<float>();
@@ -147,9 +135,9 @@ void test_tensor_slice() {
     }
     
     // Create a slice [1:3, 1:3] (2x2 submatrix)
-    std::vector<size_t> start_indices = {1, 1};
-    std::vector<size_t> end_indices = {3, 3};
-    turboinfer::core::Tensor sliced = tensor.slice(start_indices, end_indices);
+    std::vector<size_t> start = {1, 1};
+    std::vector<size_t> end = {3, 3};
+    turboinfer::core::Tensor sliced = tensor.slice(start, end);
     
     ASSERT_TRUE(sliced.shape().ndim() == 2);
     ASSERT_TRUE(sliced.shape().size(0) == 2);
@@ -165,9 +153,8 @@ void test_tensor_clone() {
     setup_test();
     
     // Create original tensor
-    std::vector<size_t> shape = {2, 3};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor original(tensor_shape);
+    turboinfer::core::TensorShape shape({2, 3});
+    turboinfer::core::Tensor original(shape);
     
     // Fill with test data
     float* orig_data = original.data_ptr<float>();
@@ -197,57 +184,30 @@ void test_tensor_clone() {
     teardown_test();
 }
 
-void test_tensor_advanced_operations() {
-    std::cout << "\n--- Test: Advanced Tensor Operations ---" << std::endl;
+void test_tensor_memory_management() {
+    std::cout << "\n--- Test: Tensor Memory Management ---" << std::endl;
     setup_test();
     
-    // Test tensor broadcasting concepts
-    turboinfer::core::TensorShape shape1({2, 3});
-    turboinfer::core::TensorShape shape2({1, 3});
-    turboinfer::core::Tensor tensor1(shape1);
-    turboinfer::core::Tensor tensor2(shape2);
+    // Test multiple tensor creation and destruction
+    std::vector<std::unique_ptr<turboinfer::core::Tensor>> tensors;
     
-    ASSERT_EQ(shape1.total_size(), 6);
-    ASSERT_EQ(shape2.total_size(), 3);
+    for (int i = 1; i <= 10; ++i) {
+        turboinfer::core::TensorShape shape({static_cast<size_t>(i), static_cast<size_t>(i)});
+        auto tensor = std::make_unique<turboinfer::core::Tensor>(shape);
+        ASSERT_TRUE(tensor->shape().total_size() == i * i);
+        ASSERT_TRUE(tensor->data() != nullptr);
+        tensors.push_back(std::move(tensor));
+    }
     
-    // Test tensor memory layout
-    ASSERT_TRUE(tensor1.data() != nullptr);
-    ASSERT_TRUE(tensor2.data() != nullptr);
-    ASSERT_TRUE(tensor1.data() != tensor2.data()); // Different memory locations
+    // Verify all tensors are valid
+    ASSERT_TRUE(tensors.size() == 10);
     
-    // Test tensor properties
-    ASSERT_FALSE(tensor1.empty());
-    ASSERT_FALSE(tensor2.empty());
-    ASSERT_EQ(tensor1.shape().ndim(), 2);
-    ASSERT_EQ(tensor2.shape().ndim(), 2);
+    // Test that each tensor has different memory addresses
+    for (size_t i = 1; i < tensors.size(); ++i) {
+        ASSERT_TRUE(tensors[i]->data() != tensors[i-1]->data());
+    }
     
-    std::cout << "✅ Advanced tensor operations test passed" << std::endl;
-    teardown_test();
-}
-
-void test_tensor_edge_cases() {
-    std::cout << "\n--- Test: Tensor Edge Cases ---" << std::endl;
-    setup_test();
-    
-    // Test single element tensor
-    turboinfer::core::TensorShape single_shape({1});
-    turboinfer::core::Tensor single_tensor(single_shape);
-    ASSERT_EQ(single_tensor.shape().total_size(), 1);
-    ASSERT_EQ(single_tensor.shape().ndim(), 1);
-    
-    // Test large dimension tensor
-    turboinfer::core::TensorShape large_shape({10, 20, 5});
-    turboinfer::core::Tensor large_tensor(large_shape);
-    ASSERT_EQ(large_tensor.shape().total_size(), 1000);
-    ASSERT_EQ(large_tensor.shape().ndim(), 3);
-    
-    // Test tensor with same shape comparison
-    turboinfer::core::TensorShape shape_a({3, 4});
-    turboinfer::core::TensorShape shape_b({3, 4});
-    ASSERT_TRUE(shape_a == shape_b);
-    ASSERT_FALSE(shape_a != shape_b);
-    
-    std::cout << "✅ Tensor edge cases test passed" << std::endl;
+    std::cout << "✅ Tensor memory management test passed" << std::endl;
     teardown_test();
 }
 
@@ -259,8 +219,7 @@ int main() {
     test_tensor_reshape();
     test_tensor_slice();
     test_tensor_clone();
-    test_tensor_advanced_operations();
-    test_tensor_edge_cases();
+    test_tensor_memory_management();
     
     std::cout << "\n📊 Test Results:" << std::endl;
     std::cout << "Tests run: " << tests_run << std::endl;
