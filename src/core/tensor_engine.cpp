@@ -1,12 +1,24 @@
 /**
  * @file tensor_engine.cpp
- * @brief Implementation of the TensorEngine class (placeholder).
+ * @brief Implementation of the TensorEngine class with SIMD optimizations.
  * @author J.J.G. Pleunes
  */
 
 #include "turboinfer/core/tensor_engine.hpp"
 #include <stdexcept>
 #include <cmath>
+
+// SIMD intrinsics support
+#ifdef TURBOINFER_SIMD_ENABLED
+    #ifdef _MSC_VER
+        #include <intrin.h>
+    #else
+        #include <immintrin.h>
+    #endif
+    #ifdef __ARM_NEON
+        #include <arm_neon.h>
+    #endif
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -16,7 +28,200 @@
 namespace {
     constexpr float GELU_COEFF = 0.044715f;           ///< Coefficient for GELU approximation
     constexpr float ATTENTION_MASK_VALUE = -1e9f;    ///< Large negative value for attention masking
+    
+    // SIMD constants
+    constexpr size_t SIMD_ALIGNMENT = 32;             ///< 256-bit alignment for AVX2
+    constexpr size_t AVX2_FLOAT_COUNT = 8;            ///< Number of floats in AVX2 register
+    constexpr size_t NEON_FLOAT_COUNT = 4;            ///< Number of floats in NEON register
 }
+
+#ifdef TURBOINFER_SIMD_ENABLED
+namespace simd_utils {
+    /**
+     * @brief Check if memory is properly aligned for SIMD operations.
+     * @param ptr Pointer to check for alignment.
+     * @param alignment Required alignment in bytes.
+     * @return True if pointer is aligned, false otherwise.
+     */
+    inline bool is_aligned(const void* ptr, size_t alignment) {
+        return (reinterpret_cast<uintptr_t>(ptr) % alignment) == 0;
+    }
+    
+    /**
+     * @brief Vectorized addition for float arrays using AVX2.
+     * @param a First input array.
+     * @param b Second input array.
+     * @param result Output array.
+     * @param size Number of elements to process.
+     */
+    void avx2_add_float(const float* a, const float* b, float* result, size_t size) {
+        const size_t simd_size = size & ~(AVX2_FLOAT_COUNT - 1);
+        
+        for (size_t i = 0; i < simd_size; i += AVX2_FLOAT_COUNT) {
+            __m256 va = _mm256_load_ps(&a[i]);
+            __m256 vb = _mm256_load_ps(&b[i]);
+            __m256 vresult = _mm256_add_ps(va, vb);
+            _mm256_store_ps(&result[i], vresult);
+        }
+        
+        // Handle remaining elements
+        for (size_t i = simd_size; i < size; ++i) {
+            result[i] = a[i] + b[i];
+        }
+    }
+    
+    /**
+     * @brief Vectorized multiplication for float arrays using AVX2.
+     * @param a First input array.
+     * @param b Second input array.
+     * @param result Output array.
+     * @param size Number of elements to process.
+     */
+    void avx2_multiply_float(const float* a, const float* b, float* result, size_t size) {
+        const size_t simd_size = size & ~(AVX2_FLOAT_COUNT - 1);
+        
+        for (size_t i = 0; i < simd_size; i += AVX2_FLOAT_COUNT) {
+            __m256 va = _mm256_load_ps(&a[i]);
+            __m256 vb = _mm256_load_ps(&b[i]);
+            __m256 vresult = _mm256_mul_ps(va, vb);
+            _mm256_store_ps(&result[i], vresult);
+        }
+        
+        // Handle remaining elements
+        for (size_t i = simd_size; i < size; ++i) {
+            result[i] = a[i] * b[i];
+        }
+    }
+    
+    /**
+     * @brief Vectorized ReLU activation using AVX2.
+     * @param input Input array.
+     * @param result Output array.
+     * @param size Number of elements to process.
+     */
+    void avx2_relu_float(const float* input, float* result, size_t size) {
+        const size_t simd_size = size & ~(AVX2_FLOAT_COUNT - 1);
+        const __m256 zero = _mm256_setzero_ps();
+        
+        for (size_t i = 0; i < simd_size; i += AVX2_FLOAT_COUNT) {
+            __m256 vinput = _mm256_load_ps(&input[i]);
+            __m256 vresult = _mm256_max_ps(vinput, zero);
+            _mm256_store_ps(&result[i], vresult);
+        }
+        
+        // Handle remaining elements
+        for (size_t i = simd_size; i < size; ++i) {
+            result[i] = std::max(0.0f, input[i]);
+        }
+    }
+
+#ifdef __ARM_NEON
+    /**
+     * @brief Vectorized addition for float arrays using NEON.
+     * @param a First input array.
+     * @param b Second input array.
+     * @param result Output array.
+     * @param size Number of elements to process.
+     */
+    void neon_add_float(const float* a, const float* b, float* result, size_t size) {
+        const size_t simd_size = size & ~(NEON_FLOAT_COUNT - 1);
+        
+        for (size_t i = 0; i < simd_size; i += NEON_FLOAT_COUNT) {
+            float32x4_t va = vld1q_f32(&a[i]);
+            float32x4_t vb = vld1q_f32(&b[i]);
+            float32x4_t vresult = vaddq_f32(va, vb);
+            vst1q_f32(&result[i], vresult);
+        }
+        
+        // Handle remaining elements
+        for (size_t i = simd_size; i < size; ++i) {
+            result[i] = a[i] + b[i];
+        }
+    }
+    
+    /**
+     * @brief Vectorized ReLU activation using NEON.
+     * @param input Input array.
+     * @param result Output array.
+     * @param size Number of elements to process.
+     */
+    void neon_relu_float(const float* input, float* result, size_t size) {
+        const size_t simd_size = size & ~(NEON_FLOAT_COUNT - 1);
+        const float32x4_t zero = vdupq_n_f32(0.0f);
+        
+        for (size_t i = 0; i < simd_size; i += NEON_FLOAT_COUNT) {
+            float32x4_t vinput = vld1q_f32(&input[i]);
+            float32x4_t vresult = vmaxq_f32(vinput, zero);
+            vst1q_f32(&result[i], vresult);
+        }
+        
+        // Handle remaining elements
+        for (size_t i = simd_size; i < size; ++i) {
+            result[i] = std::max(0.0f, input[i]);
+        }
+    }
+#endif // __ARM_NEON
+
+    /**
+     * @brief SIMD-optimized GEMM (General Matrix Multiply) implementation.
+     * @param a_data Pointer to matrix A data (M x K).
+     * @param b_data Pointer to matrix B data (K x N).
+     * @param result_data Pointer to result matrix C data (M x N).
+     * @param M Number of rows in A and C.
+     * @param K Number of columns in A and rows in B.
+     * @param N Number of columns in B and C.
+     */
+    void simd_gemm_float(const float* a_data, const float* b_data, float* result_data,
+                        size_t M, size_t K, size_t N) {
+        // Use tiled approach with SIMD for better cache locality and vectorization
+        constexpr size_t TILE_SIZE = 64;  // Tile size for cache optimization
+        
+        for (size_t i_tile = 0; i_tile < M; i_tile += TILE_SIZE) {
+            for (size_t j_tile = 0; j_tile < N; j_tile += TILE_SIZE) {
+                for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                    // Process tile
+                    size_t i_end = std::min(i_tile + TILE_SIZE, M);
+                    size_t j_end = std::min(j_tile + TILE_SIZE, N);
+                    size_t k_end = std::min(k_tile + TILE_SIZE, K);
+                    
+                    for (size_t i = i_tile; i < i_end; ++i) {
+                        for (size_t j = j_tile; j < j_end; j += AVX2_FLOAT_COUNT) {
+                            // Vectorize inner loop using AVX2
+                            size_t j_vec_end = std::min(j + AVX2_FLOAT_COUNT, j_end);
+                            __m256 sum_vec = _mm256_setzero_ps();
+                            
+                            for (size_t k = k_tile; k < k_end; ++k) {
+                                __m256 a_vec = _mm256_broadcast_ss(&a_data[i * K + k]);
+                                
+                                if (j_vec_end - j == AVX2_FLOAT_COUNT) {
+                                    __m256 b_vec = _mm256_loadu_ps(&b_data[k * N + j]);
+                                    sum_vec = _mm256_fmadd_ps(a_vec, b_vec, sum_vec);
+                                } else {
+                                    // Handle remainder elements
+                                    for (size_t jj = j; jj < j_vec_end; ++jj) {
+                                        result_data[i * N + jj] += a_data[i * K + k] * b_data[k * N + jj];
+                                    }
+                                    break;
+                                }
+                            }
+                            
+                            if (j_vec_end - j == AVX2_FLOAT_COUNT) {
+                                if (k_tile == 0) {
+                                    _mm256_storeu_ps(&result_data[i * N + j], sum_vec);
+                                } else {
+                                    __m256 existing = _mm256_loadu_ps(&result_data[i * N + j]);
+                                    _mm256_storeu_ps(&result_data[i * N + j], _mm256_add_ps(existing, sum_vec));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+} // namespace simd_utils
+#endif // TURBOINFER_SIMD_ENABLED
 
 namespace turboinfer {
 namespace core {
@@ -94,7 +299,27 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
         
         // Basic GEMM implementation: C = A * B
         // Using row-major order
-        // TODO(Phase 5): Optimize with loop tiling, SIMD instructions, or BLAS libraries for better performance
+#ifdef TURBOINFER_SIMD_ENABLED
+        // Initialize result to zero for tiled SIMD implementation
+        std::fill(result_data, result_data + M * N, 0.0f);
+        
+        // Use SIMD-optimized GEMM for larger matrices
+        if (M >= 32 && N >= 32 && K >= 32) {
+            simd_utils::simd_gemm_float(a_data, b_data, result_data, M, K, N);
+        } else {
+            // Use scalar implementation for small matrices
+            for (size_t i = 0; i < M; ++i) {
+                for (size_t j = 0; j < N; ++j) {
+                    float sum = 0.0f;
+                    for (size_t k = 0; k < K; ++k) {
+                        sum += a_data[i * K + k] * b_data[k * N + j];
+                    }
+                    result_data[i * N + j] = sum;
+                }
+            }
+        }
+#else
+        // Scalar implementation when SIMD is disabled
         for (size_t i = 0; i < M; ++i) {
             for (size_t j = 0; j < N; ++j) {
                 float sum = 0.0f;
@@ -104,6 +329,7 @@ Tensor TensorEngine::matmul(const Tensor& a, const Tensor& b) {
                 result_data[i * N + j] = sum;
             }
         }
+#endif
     } else {
         throw std::runtime_error("Matrix multiplication currently only supports Float32 data type");
     }
@@ -257,15 +483,35 @@ Tensor TensorEngine::relu(const Tensor& input) {
         const float* input_data = input.data_ptr<float>();
         float* result_data = result.data_ptr<float>();
         
+#ifdef TURBOINFER_SIMD_ENABLED
+        // Use SIMD optimizations if data is aligned and size is sufficient
+        if (total_elements >= AVX2_FLOAT_COUNT && 
+            simd_utils::is_aligned(input_data, SIMD_ALIGNMENT) &&
+            simd_utils::is_aligned(result_data, SIMD_ALIGNMENT)) {
+#ifdef __ARM_NEON
+    simd_utils::neon_relu_float(input_data, result_data, total_elements);
+#else
+    simd_utils::avx2_relu_float(input_data, result_data, total_elements);
+#endif
+        } else {
+            // Fallback to scalar implementation
+            for (size_t i = 0; i < total_elements; ++i) {
+                result_data[i] = std::max(0.0f, input_data[i]);
+            }
+        }
+#else
+        // Scalar implementation when SIMD is disabled
         for (size_t i = 0; i < total_elements; ++i) {
             result_data[i] = std::max(0.0f, input_data[i]);
         }
+#endif
     } else {
         throw std::runtime_error("ReLU currently only supports Float32 data type");
     }
     
     return result;
 }
+
 
 Tensor TensorEngine::gelu(const Tensor& input) {
     if (input.empty()) {
@@ -823,9 +1069,29 @@ Tensor TensorEngine::add(const Tensor& a, const Tensor& b) {
         const float* b_data = b.data_ptr<float>();
         float* result_data = result.data_ptr<float>();
         
+#ifdef TURBOINFER_SIMD_ENABLED
+        // Use SIMD optimizations if data is aligned and size is sufficient
+        if (total_elements >= AVX2_FLOAT_COUNT && 
+            simd_utils::is_aligned(a_data, SIMD_ALIGNMENT) &&
+            simd_utils::is_aligned(b_data, SIMD_ALIGNMENT) &&
+            simd_utils::is_aligned(result_data, SIMD_ALIGNMENT)) {
+#ifdef __ARM_NEON
+            simd_utils::neon_add_float(a_data, b_data, result_data, total_elements);
+#else
+            simd_utils::avx2_add_float(a_data, b_data, result_data, total_elements);
+#endif
+        } else {
+            // Fallback to scalar implementation
+            for (size_t i = 0; i < total_elements; ++i) {
+                result_data[i] = a_data[i] + b_data[i];
+            }
+        }
+#else
+        // Scalar implementation when SIMD is disabled
         for (size_t i = 0; i < total_elements; ++i) {
             result_data[i] = a_data[i] + b_data[i];
         }
+#endif
     } else {
         throw std::runtime_error("Element-wise addition currently only supports Float32 data type");
     }
@@ -857,9 +1123,40 @@ Tensor TensorEngine::multiply(const Tensor& a, const Tensor& b) {
         const float* b_data = b.data_ptr<float>();
         float* result_data = result.data_ptr<float>();
         
+#ifdef TURBOINFER_SIMD_ENABLED
+        // Use SIMD optimizations if data is aligned and size is sufficient
+        if (total_elements >= AVX2_FLOAT_COUNT && 
+            simd_utils::is_aligned(a_data, SIMD_ALIGNMENT) &&
+            simd_utils::is_aligned(b_data, SIMD_ALIGNMENT) &&
+            simd_utils::is_aligned(result_data, SIMD_ALIGNMENT)) {
+#ifdef __ARM_NEON
+            // NEON multiplication
+            const size_t simd_size = total_elements & ~(NEON_FLOAT_COUNT - 1);
+            for (size_t i = 0; i < simd_size; i += NEON_FLOAT_COUNT) {
+                float32x4_t va = vld1q_f32(&a_data[i]);
+                float32x4_t vb = vld1q_f32(&b_data[i]);
+                float32x4_t vresult = vmulq_f32(va, vb);
+                vst1q_f32(&result_data[i], vresult);
+            }
+            // Handle remaining elements
+            for (size_t i = simd_size; i < total_elements; ++i) {
+                result_data[i] = a_data[i] * b_data[i];
+            }
+#else
+            simd_utils::avx2_multiply_float(a_data, b_data, result_data, total_elements);
+#endif
+        } else {
+            // Fallback to scalar implementation
+            for (size_t i = 0; i < total_elements; ++i) {
+                result_data[i] = a_data[i] * b_data[i];
+            }
+        }
+#else
+        // Scalar implementation when SIMD is disabled
         for (size_t i = 0; i < total_elements; ++i) {
             result_data[i] = a_data[i] * b_data[i];
         }
+#endif
     } else {
         throw std::runtime_error("Element-wise multiplication currently only supports Float32 data type");
     }
