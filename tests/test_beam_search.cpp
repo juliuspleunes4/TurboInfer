@@ -42,10 +42,10 @@ void test_basic_beam_search() {
         
         // Initialize a simple tensor for testing
         turboinfer::core::TensorShape shape({100, 768});
-        auto test_tensor = std::make_unique<turboinfer::core::Tensor>(shape, turboinfer::core::DataType::kFloat32);
+        turboinfer::core::Tensor test_tensor(shape, turboinfer::core::DataType::kFloat32);
         
         // Fill with small random values
-        auto data_ptr = static_cast<float*>(test_tensor->data());
+        auto data_ptr = static_cast<float*>(test_tensor.data());
         for (size_t i = 0; i < shape.total_size(); ++i) {
             data_ptr[i] = static_cast<float>(i % 100) / 1000.0f;
         }
@@ -127,14 +127,14 @@ void test_beam_search_different_sizes() {
         metadata.hidden_size = 768;
         metadata.num_layers = 2;
         metadata.num_heads = 12;
-        metadata.max_position_embeddings = 2048;
         
-        ModelData test_model_data(metadata);
+        ModelData test_model_data;
+        test_model_data.metadata() = metadata;
         
         // Add minimal tensor
-        core::TensorShape shape({100, 768});
-        auto test_tensor = std::make_unique<core::Tensor>(shape, core::DataType::kFloat32);
-        auto data_ptr = static_cast<float*>(test_tensor->data());
+        turboinfer::core::TensorShape shape({100, 768});
+        turboinfer::core::Tensor test_tensor(shape, turboinfer::core::DataType::kFloat32);
+        auto data_ptr = static_cast<float*>(test_tensor.data());
         for (size_t i = 0; i < shape.total_size(); ++i) {
             data_ptr[i] = static_cast<float>(i % 100) / 1000.0f;
         }
@@ -184,14 +184,14 @@ void test_beam_search_error_handling() {
         metadata.hidden_size = 768;
         metadata.num_layers = 2;
         metadata.num_heads = 12;
-        metadata.max_position_embeddings = 2048;
         
-        ModelData test_model_data(metadata);
+        ModelData test_model_data;
+        test_model_data.metadata() = metadata;
         
         // Add minimal tensor
-        core::TensorShape shape({100, 768});
-        auto test_tensor = std::make_unique<core::Tensor>(shape, core::DataType::kFloat32);
-        auto data_ptr = static_cast<float*>(test_tensor->data());
+        turboinfer::core::TensorShape shape({100, 768});
+        turboinfer::core::Tensor test_tensor(shape, turboinfer::core::DataType::kFloat32);
+        auto data_ptr = static_cast<float*>(test_tensor.data());
         for (size_t i = 0; i < shape.total_size(); ++i) {
             data_ptr[i] = static_cast<float>(i % 100) / 1000.0f;
         }

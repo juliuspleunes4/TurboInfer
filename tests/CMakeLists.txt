@@ -16,6 +16,7 @@ set(TEST_SOURCES
     test_performance.cpp
     test_quantization.cpp
     test_beam_search_simple.cpp
+    test_beam_search.cpp
     test_inference_engine.cpp
     test_phase4_complete.cpp
 )
