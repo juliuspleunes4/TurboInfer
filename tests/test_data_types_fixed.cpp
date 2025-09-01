@@ -133,16 +133,22 @@ void test_endianness() {
     teardown_test();
 }
 
-void test_placeholder() {
-    std::cout << "\n--- Test: Basic Functionality ---" << std::endl;
+void test_data_type_limits() {
+    std::cout << "\n--- Test: Data Type Limits ---" << std::endl;
     setup_test();
     
-    // Basic sanity checks
-    ASSERT_TRUE(true);
-    ASSERT_TRUE(1 + 1 == 2);
-    ASSERT_TRUE(sizeof(char) == 1);
+    // Test numeric limits for various data types
+    ASSERT_TRUE(std::numeric_limits<float>::max() > 1000000.0f);
+    ASSERT_TRUE(std::numeric_limits<float>::min() > 0.0f);
+    ASSERT_TRUE(std::numeric_limits<int32_t>::max() > 2000000000);
+    ASSERT_TRUE(std::numeric_limits<int32_t>::min() < -2000000000);
     
-    std::cout << "✅ Basic functionality test passed" << std::endl;
+    // Test special float values
+    ASSERT_TRUE(std::isfinite(42.0f));
+    ASSERT_TRUE(!std::isfinite(std::numeric_limits<float>::infinity()));
+    ASSERT_TRUE(std::isnan(std::numeric_limits<float>::quiet_NaN()));
+    
+    std::cout << "✅ Data type limits test passed" << std::endl;
     teardown_test();
 }
 
@@ -154,7 +160,7 @@ int main() {
     test_integer_overflow();
     test_memory_alignment();
     test_endianness();
-    test_placeholder();
+    test_data_type_limits();
     
     std::cout << "\n📊 Test Results:" << std::endl;
     std::cout << "Tests run: " << tests_run << std::endl;

@@ -117,8 +117,22 @@ void test_tensor_engine_basic() {
     
     turboinfer::core::TensorEngine engine;
     
-    // Test engine initialization
-    ASSERT_TRUE(true); // Engine created successfully
+    // Test engine functionality with actual operations
+    turboinfer::core::TensorShape shape({2, 2});
+    turboinfer::core::Tensor tensor1(shape);
+    turboinfer::core::Tensor tensor2(shape);
+    
+    // Fill tensors with test data
+    float* data1 = tensor1.data_ptr<float>();
+    float* data2 = tensor2.data_ptr<float>();
+    for (int i = 0; i < 4; ++i) {
+        data1[i] = static_cast<float>(i + 1);
+        data2[i] = static_cast<float>(i + 1);
+    }
+    
+    // Test that engine can perform basic operations
+    ASSERT_NO_THROW(engine.add(tensor1, tensor2));
+    ASSERT_NO_THROW(engine.multiply(tensor1, tensor2));
     
     teardown_test();
 }
