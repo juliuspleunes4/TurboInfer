@@ -149,6 +149,21 @@ public:
         bool include_logprobs = false);
 
     /**
+     * @brief Generates text using beam search for better quality results.
+     * @param input_tokens Input token sequence.
+     * @param max_new_tokens Maximum number of tokens to generate.
+     * @param beam_size Number of beams to maintain during search.
+     * @param include_logprobs Whether to include log probabilities in results.
+     * @return Vector of generation results (one per beam, sorted by score).
+     * @throws std::runtime_error if beam search fails.
+     */
+    std::vector<GenerationResult> generate_beam_search(
+        const std::vector<int>& input_tokens,
+        size_t max_new_tokens,
+        size_t beam_size = 4,
+        bool include_logprobs = false);
+
+    /**
      * @brief Computes log probabilities for a sequence without generation.
      * @param tokens Input token sequence.
      * @return Log probabilities for each token position.
@@ -214,6 +229,70 @@ private:
      * @throws std::runtime_error if batch size exceeds limit.
      */
     void validate_batch_size(size_t batch_size) const;
+
+    /**
+     * @brief Forward pass through the transformer model.
+     * @param tokens Input token sequence.
+     * @return Logits tensor for next token prediction.
+     */
+    core::Tensor forward_pass(const std::vector<int>& tokens);
+
+    /**
+     * @brief Sample next token from logits using configured sampling strategy.
+     * @param logits Output logits from model.
+     * @param logprobs Optional pointer to store log probabilities.
+     * @return Sampled token ID.
+     */
+    int sample_next_token(const core::Tensor& logits, std::vector<float>* logprobs = nullptr);
+
+    /**
+     * @brief Apply temperature scaling to logits.
+     * @param logits Input logits tensor.
+     * @param temperature Temperature value.
+     * @return Temperature-scaled logits.
+     */
+    core::Tensor apply_temperature(const core::Tensor& logits, float temperature);
+
+    /**
+     * @brief Apply top-k sampling filter.
+     * @param logits Input logits tensor.
+     * @param k Top-k value.
+     * @return Filtered logits.
+     */
+    core::Tensor apply_top_k(const core::Tensor& logits, size_t k);
+
+    /**
+     * @brief Apply top-p (nucleus) sampling filter.
+     * @param logits Input logits tensor.
+     * @param p Top-p value.
+     * @return Filtered logits.
+     */
+    core::Tensor apply_top_p(const core::Tensor& logits, float p);
+
+    /**
+     * @brief Beam search helper structure for maintaining candidate sequences.
+     */
+    struct BeamCandidate {
+        std::vector<int> tokens;
+        float score;
+        float log_prob;
+        bool finished;
+        
+        BeamCandidate(const std::vector<int>& initial_tokens = {})
+            : tokens(initial_tokens), score(0.0f), log_prob(0.0f), finished(false) {}
+    };
+
+    /**
+     * @brief Performs beam search decoding.
+     * @param input_tokens Input token sequence.
+     * @param max_new_tokens Maximum tokens to generate.
+     * @param beam_size Number of beams to maintain.
+     * @return Vector of beam candidates sorted by score.
+     */
+    std::vector<BeamCandidate> beam_search_decode(
+        const std::vector<int>& input_tokens,
+        size_t max_new_tokens,
+        size_t beam_size);
 };
 
 /**
