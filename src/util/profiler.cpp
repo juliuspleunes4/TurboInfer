@@ -9,8 +9,10 @@
 #include <vector>
 #include <mutex>
 #include <sstream>
+#include <fstream>
 #include <iomanip>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <string>
 
@@ -187,8 +189,87 @@ std::string Profiler::generate_report(bool sort_by_time) const {
 }
 
 bool Profiler::save_report(const std::string& file_path, const std::string& format) const {
-    // Placeholder implementation
-    return false;
+    if (!enabled_) {
+        return false; // No data to save if profiling is disabled
+    }
+    
+    // Validate format first before creating any files
+    if (format != "text" && format != "json" && format != "csv") {
+        return false; // Invalid format
+    }
+    
+    try {
+        std::ofstream file(file_path);
+        if (!file.is_open()) {
+            return false;
+        }
+        
+        // Get sorted stats (same logic as generate_report)
+        std::vector<ProfileStats> stats_vec;
+        for (const auto& pair : impl_->stats_) {
+            stats_vec.push_back(pair.second);
+        }
+        
+        std::sort(stats_vec.begin(), stats_vec.end(), 
+                 [](const ProfileStats& a, const ProfileStats& b) {
+                     return a.total_time_ms > b.total_time_ms;
+                 });
+        
+        if (format == "json") {
+            // JSON format
+            file << "{\n";
+            file << "  \"profiling_report\": {\n";
+            file << "    \"generated_at\": \"" << std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count() << "\",\n";
+            file << "    \"total_operations\": " << stats_vec.size() << ",\n";
+            file << "    \"operations\": [\n";
+            
+            for (size_t i = 0; i < stats_vec.size(); ++i) {
+                const auto& stats = stats_vec[i];
+                file << "      {\n";
+                file << "        \"name\": \"" << stats.name << "\",\n";
+                file << "        \"call_count\": " << stats.call_count << ",\n";
+                file << "        \"total_time_ms\": " << std::fixed << std::setprecision(3) << stats.total_time_ms << ",\n";
+                file << "        \"avg_time_ms\": " << std::fixed << std::setprecision(3) << stats.avg_time_ms << ",\n";
+                file << "        \"min_time_ms\": " << std::fixed << std::setprecision(3) << stats.min_time_ms << ",\n";
+                file << "        \"max_time_ms\": " << std::fixed << std::setprecision(3) << stats.max_time_ms << ",\n";
+                file << "        \"total_memory_bytes\": " << stats.total_memory_bytes << ",\n";
+                file << "        \"memory_mb\": " << std::fixed << std::setprecision(2) << (stats.total_memory_bytes / 1024.0 / 1024.0) << "\n";
+                file << "      }";
+                if (i < stats_vec.size() - 1) file << ",";
+                file << "\n";
+            }
+            
+            file << "    ]\n";
+            file << "  }\n";
+            file << "}\n";
+            
+        } else if (format == "csv") {
+            // CSV format
+            file << "Operation,Calls,Total_Time_ms,Avg_Time_ms,Min_Time_ms,Max_Time_ms,Memory_MB\n";
+            
+            for (const auto& stats : stats_vec) {
+                file << "\"" << stats.name << "\","
+                     << stats.call_count << ","
+                     << std::fixed << std::setprecision(3) << stats.total_time_ms << ","
+                     << std::fixed << std::setprecision(3) << stats.avg_time_ms << ","
+                     << std::fixed << std::setprecision(3) << stats.min_time_ms << ","
+                     << std::fixed << std::setprecision(3) << stats.max_time_ms << ","
+                     << std::fixed << std::setprecision(2) << (stats.total_memory_bytes / 1024.0 / 1024.0) << "\n";
+            }
+            
+        } else if (format == "text") {
+            // Text format (same as generate_report)
+            file << generate_report(true);
+        }
+        
+        file.close();
+        return true;
+        
+    } catch (const std::exception& e) {
+        // Log error if logging is available, otherwise silently fail
+        return false;
+    }
 }
 
 // ScopedProfiler implementation

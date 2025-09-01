@@ -77,8 +77,8 @@ void test_tensor_basic_operations() {
     turboinfer::core::Tensor tensor1(shape);
     ASSERT_EQ(shape.total_size(), 6);
     ASSERT_EQ(shape.ndim(), 2);
-    ASSERT_EQ(shape[0], 3);
-    ASSERT_EQ(shape[1], 2);
+    ASSERT_EQ(shape.size(0), 3);
+    ASSERT_EQ(shape.size(1), 2);
     
     // Test tensor data access
     ASSERT_NO_THROW(tensor1.data());
@@ -131,9 +131,9 @@ void test_tensor_shape_operations() {
     turboinfer::core::TensorShape shape1({2, 3, 4});
     ASSERT_EQ(shape1.ndim(), 3);
     ASSERT_EQ(shape1.total_size(), 24);
-    ASSERT_EQ(shape1[0], 2);
-    ASSERT_EQ(shape1[1], 3);
-    ASSERT_EQ(shape1[2], 4);
+    ASSERT_EQ(shape1.size(0), 2);
+    ASSERT_EQ(shape1.size(1), 3);
+    ASSERT_EQ(shape1.size(2), 4);
     
     // Test shape equality
     turboinfer::core::TensorShape shape2({2, 3, 4});
