@@ -43,6 +43,11 @@ foreach(TEST_FILE ${TEST_SOURCES})
         CXX_STANDARD_REQUIRED ON
     )
     
+    # Fix Windows MinGW console subsystem issue
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_options(${TEST_NAME} PRIVATE "-mconsole")
+    endif()
+    
     # Add to CTest
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endforeach()
