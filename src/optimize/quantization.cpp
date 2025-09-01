@@ -5,6 +5,7 @@
  */
 
 #include "turboinfer/optimize/quantization.hpp"
+#include "turboinfer/model/inference_engine.hpp"
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
@@ -491,10 +492,108 @@ float Quantizer::validate_quantization_accuracy(const model::ModelData& original
         return (total_elements > 0) ? total_error / total_elements : 0.0f;
     }
     
-    // TODO: Implement inference-based accuracy validation when inference engine is available
-    // This would run both models on test inputs and compare outputs
+    // Real inference-based accuracy validation
+    std::cout << "Performing inference-based quantization validation..." << std::endl;
     
-    // For now, return a conservative estimate based on quantization type
+    try {
+        // Create inference engines for both models
+        model::InferenceEngine original_engine(original_model);
+        model::InferenceEngine quantized_engine(quantized_model);
+        
+        float total_error = 0.0f;
+        size_t total_comparisons = 0;
+        size_t successful_comparisons = 0;
+        
+        // Test each input with both models
+        for (size_t input_idx = 0; input_idx < test_inputs.size(); ++input_idx) {
+            const auto& test_input = test_inputs[input_idx];
+            
+            // Convert tensor to token sequence (assume it's already tokenized)
+            std::vector<int> token_sequence;
+            if (test_input.shape().dimensions().size() == 1) {
+                // 1D tensor - treat as token sequence
+                size_t seq_len = test_input.shape().dimensions()[0];
+                token_sequence.resize(seq_len);
+                
+                if (test_input.dtype() == core::DataType::kFloat32) {
+                    const float* data = test_input.data_ptr<float>();
+                    for (size_t i = 0; i < seq_len; ++i) {
+                        token_sequence[i] = static_cast<int>(std::round(data[i]));
+                    }
+                } else if (test_input.dtype() == core::DataType::kInt32) {
+                    const int32_t* data = test_input.data_ptr<int32_t>();
+                    for (size_t i = 0; i < seq_len; ++i) {
+                        token_sequence[i] = data[i];
+                    }
+                }
+            } else {
+                // Skip non-sequential inputs for now
+                std::cout << "  Skipping input " << input_idx << " (non-sequential shape)" << std::endl;
+                continue;
+            }
+            
+            // Limit sequence length for performance
+            if (token_sequence.size() > 128) {
+                token_sequence.resize(128);
+            }
+            
+            // Skip empty or invalid sequences
+            if (token_sequence.empty() || token_sequence.size() < 2) {
+                std::cout << "  Skipping input " << input_idx << " (too short)" << std::endl;
+                continue;
+            }
+            
+            try {
+                // Compute log probabilities for both models
+                auto original_logprobs = original_engine.compute_logprobs(token_sequence);
+                auto quantized_logprobs = quantized_engine.compute_logprobs(token_sequence);
+                
+                // Compare log probabilities
+                if (original_logprobs.size() != quantized_logprobs.size()) {
+                    std::cout << "  Warning: Logprob size mismatch for input " << input_idx << std::endl;
+                    continue;
+                }
+                
+                // Calculate difference in log probabilities
+                float input_error = 0.0f;
+                for (size_t i = 0; i < original_logprobs.size(); ++i) {
+                    float error = std::abs(original_logprobs[i] - quantized_logprobs[i]);
+                    input_error += error;
+                }
+                
+                input_error /= original_logprobs.size(); // Average error for this input
+                total_error += input_error;
+                successful_comparisons++;
+                
+                std::cout << "  Input " << input_idx << ": " << input_error << " avg logprob difference" << std::endl;
+                
+            } catch (const std::exception& e) {
+                std::cout << "  Error processing input " << input_idx << ": " << e.what() << std::endl;
+                continue;
+            }
+            
+            total_comparisons++;
+        }
+        
+        if (successful_comparisons > 0) {
+            float avg_error = total_error / successful_comparisons;
+            std::cout << "Inference validation complete: " << successful_comparisons << "/" << test_inputs.size() 
+                      << " inputs processed, " << avg_error << " average logprob difference" << std::endl;
+            
+            // Convert log probability difference to a normalized error metric
+            // Log probabilities typically range from 0 to -20, so differences of 0.1-1.0 are significant
+            float normalized_error = std::min(avg_error / 10.0f, 1.0f); // Normalize to 0-1 range
+            return normalized_error;
+        } else {
+            std::cout << "Warning: No successful inference comparisons - falling back to tensor-level validation" << std::endl;
+        }
+        
+    } catch (const std::exception& e) {
+        std::cout << "Inference validation failed: " << e.what() << " - falling back to conservative estimates" << std::endl;
+    }
+    
+    // Fallback to conservative estimates if inference validation fails
+    std::cout << "Using conservative quantization error estimates" << std::endl;
     switch (config_.type) {
         case QuantizationType::kInt4:
             return 0.05f; // ~5% error for 4-bit quantization
