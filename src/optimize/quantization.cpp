@@ -393,13 +393,119 @@ QuantizationInfo Quantizer::calculate_quantization_info(const core::Tensor& inpu
 }
 
 float Quantizer::estimate_compression_ratio(const model::ModelData& model_data) {
-    return 2.0f; // Placeholder
+    if (model_data.num_tensors() == 0) {
+        return 1.0f; // No compression if no data
+    }
+    
+    size_t original_size = 0;
+    size_t compressed_size = 0;
+    
+    auto tensor_names = model_data.tensor_names();
+    for (const auto& name : tensor_names) {
+        const auto* tensor = model_data.get_tensor(name);
+        if (!tensor) continue;
+        
+        size_t tensor_elements = 1;
+        for (size_t dim : tensor->shape().dimensions()) {
+            tensor_elements *= dim;
+        }
+        
+        // Calculate original size (assuming float32)
+        original_size += tensor_elements * sizeof(float);
+        
+        // Calculate compressed size based on quantization type
+        switch (config_.type) {
+            case QuantizationType::kInt4:
+                compressed_size += (tensor_elements + 1) / 2; // 4 bits per element
+                break;
+            case QuantizationType::kInt8:
+                compressed_size += tensor_elements; // 8 bits per element
+                break;
+            case QuantizationType::kFloat16:
+                compressed_size += tensor_elements * 2; // 16 bits per element
+                break;
+            case QuantizationType::kNone:
+            default:
+                compressed_size += tensor_elements * sizeof(float);
+                break;
+        }
+        
+        // Add overhead for quantization parameters (scale, zero_point per tensor)
+        if (config_.type != QuantizationType::kNone) {
+            compressed_size += sizeof(float) + sizeof(int32_t); // scale + zero_point
+        }
+    }
+    
+    if (original_size == 0) {
+        return 1.0f;
+    }
+    
+    return static_cast<float>(original_size) / static_cast<float>(compressed_size);
 }
 
 float Quantizer::validate_quantization_accuracy(const model::ModelData& original_model,
                                                const model::ModelData& quantized_model,
                                                const std::vector<core::Tensor>& test_inputs) {
-    return 0.01f; // Placeholder: 1% error
+    if (original_model.num_tensors() == 0 || quantized_model.num_tensors() == 0) {
+        return 0.0f; // No accuracy to measure
+    }
+    
+    if (test_inputs.empty()) {
+        // If no test inputs provided, compare tensor values directly
+        float total_error = 0.0f;
+        size_t total_elements = 0;
+        
+        auto orig_tensor_names = original_model.tensor_names();
+        for (const auto& name : orig_tensor_names) {
+            const auto* orig_tensor = original_model.get_tensor(name);
+            const auto* quant_tensor = quantized_model.get_tensor(name);
+            
+            if (!orig_tensor || !quant_tensor) {
+                continue; // Skip if tensor not found in either model
+            }
+            
+            // Ensure tensors have same shape
+            if (orig_tensor->shape() != quant_tensor->shape()) {
+                continue;
+            }
+            
+            // Calculate element-wise error
+            size_t num_elements = 1;
+            for (size_t dim : orig_tensor->shape().dimensions()) {
+                num_elements *= dim;
+            }
+            
+            const float* orig_data = orig_tensor->data_ptr<float>();
+            const float* quant_data = quant_tensor->data_ptr<float>();
+            
+            for (size_t i = 0; i < num_elements; ++i) {
+                float error = std::abs(orig_data[i] - quant_data[i]);
+                float relative_error = (orig_data[i] != 0.0f) ? 
+                    error / std::abs(orig_data[i]) : error;
+                total_error += relative_error;
+            }
+            
+            total_elements += num_elements;
+        }
+        
+        return (total_elements > 0) ? total_error / total_elements : 0.0f;
+    }
+    
+    // TODO: Implement inference-based accuracy validation when inference engine is available
+    // This would run both models on test inputs and compare outputs
+    
+    // For now, return a conservative estimate based on quantization type
+    switch (config_.type) {
+        case QuantizationType::kInt4:
+            return 0.05f; // ~5% error for 4-bit quantization
+        case QuantizationType::kInt8:
+            return 0.02f; // ~2% error for 8-bit quantization
+        case QuantizationType::kFloat16:
+            return 0.001f; // ~0.1% error for 16-bit quantization
+        case QuantizationType::kNone:
+        default:
+            return 0.0f; // No quantization error
+    }
 }
 
 void Quantizer::initialize() {

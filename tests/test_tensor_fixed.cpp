@@ -39,25 +39,22 @@ void test_tensor_creation() {
     
     // Test 1D tensor creation
     std::vector<size_t> shape1d = {10};
-    turboinfer::core::TensorShape tensor_shape1d(shape1d);
-    turboinfer::core::Tensor tensor1d(tensor_shape1d);
-    ASSERT_TRUE(tensor1d.shape().ndim() == 1);
+    turboinfer::core::Tensor tensor1d(shape1d);
+    ASSERT_TRUE(tensor1d.shape().num_dimensions() == 1);
     ASSERT_TRUE(tensor1d.shape().total_size() == 10);
     ASSERT_TRUE(tensor1d.shape().dimensions() == shape1d);
     
     // Test 2D tensor creation
     std::vector<size_t> shape2d = {3, 4};
-    turboinfer::core::TensorShape tensor_shape2d(shape2d);
-    turboinfer::core::Tensor tensor2d(tensor_shape2d);
-    ASSERT_TRUE(tensor2d.shape().ndim() == 2);
+    turboinfer::core::Tensor tensor2d(shape2d);
+    ASSERT_TRUE(tensor2d.shape().num_dimensions() == 2);
     ASSERT_TRUE(tensor2d.shape().total_size() == 12);
     ASSERT_TRUE(tensor2d.shape().dimensions() == shape2d);
     
     // Test 3D tensor creation
     std::vector<size_t> shape3d = {2, 3, 4};
-    turboinfer::core::TensorShape tensor_shape3d(shape3d);
-    turboinfer::core::Tensor tensor3d(tensor_shape3d);
-    ASSERT_TRUE(tensor3d.shape().ndim() == 3);
+    turboinfer::core::Tensor tensor3d(shape3d);
+    ASSERT_TRUE(tensor3d.shape().num_dimensions() == 3);
     ASSERT_TRUE(tensor3d.shape().total_size() == 24);
     ASSERT_TRUE(tensor3d.shape().dimensions() == shape3d);
     
@@ -71,8 +68,7 @@ void test_tensor_data_access() {
     
     // Create a 2x3 tensor
     std::vector<size_t> shape = {2, 3};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::Tensor tensor(shape);
     
     // Test data access and modification
     float* data = tensor.data_ptr<float>();
@@ -98,8 +94,7 @@ void test_tensor_reshape() {
     
     // Create a 2x6 tensor
     std::vector<size_t> original_shape = {2, 6};
-    turboinfer::core::TensorShape tensor_shape(original_shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::Tensor tensor(original_shape);
     
     // Fill with test data
     float* data = tensor.data_ptr<float>();
@@ -109,11 +104,10 @@ void test_tensor_reshape() {
     
     // Reshape to 3x4
     std::vector<size_t> new_shape = {3, 4};
-    turboinfer::core::TensorShape new_tensor_shape(new_shape);
-    tensor = tensor.reshape(new_tensor_shape);
+    tensor.reshape(new_shape);
     
     ASSERT_TRUE(tensor.shape().dimensions() == new_shape);
-    ASSERT_TRUE(tensor.shape().ndim() == 2);
+    ASSERT_TRUE(tensor.shape().num_dimensions() == 2);
     ASSERT_TRUE(tensor.shape().total_size() == 12);
     
     // Verify data is preserved
@@ -132,8 +126,7 @@ void test_tensor_slice() {
     
     // Create a 4x4 tensor
     std::vector<size_t> shape = {4, 4};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::Tensor tensor(shape);
     
     // Fill with test data
     float* data = tensor.data_ptr<float>();
@@ -142,11 +135,10 @@ void test_tensor_slice() {
     }
     
     // Create a slice [1:3, 1:3] (2x2 submatrix)
-    std::vector<size_t> start_indices = {1, 1};
-    std::vector<size_t> end_indices = {3, 3};
-    turboinfer::core::Tensor sliced = tensor.slice(start_indices, end_indices);
+    std::vector<std::pair<size_t, size_t>> slice_ranges = {{1, 3}, {1, 3}};
+    turboinfer::core::Tensor sliced = tensor.slice(slice_ranges);
     
-    ASSERT_TRUE(sliced.shape().ndim() == 2);
+    ASSERT_TRUE(sliced.shape().num_dimensions() == 2);
     ASSERT_TRUE(sliced.shape().size(0) == 2);
     ASSERT_TRUE(sliced.shape().size(1) == 2);
     ASSERT_TRUE(sliced.shape().total_size() == 4);
@@ -161,8 +153,7 @@ void test_tensor_clone() {
     
     // Create original tensor
     std::vector<size_t> shape = {2, 3};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor original(tensor_shape);
+    turboinfer::core::Tensor original(shape);
     
     // Fill with test data
     float* orig_data = original.data_ptr<float>();
@@ -175,7 +166,7 @@ void test_tensor_clone() {
     
     // Verify clone has same properties
     ASSERT_TRUE(clone.shape().dimensions() == original.shape().dimensions());
-    ASSERT_TRUE(clone.shape().ndim() == original.shape().ndim());
+    ASSERT_TRUE(clone.shape().num_dimensions() == original.shape().num_dimensions());
     ASSERT_TRUE(clone.shape().total_size() == original.shape().total_size());
     
     // Verify data is copied
@@ -198,8 +189,7 @@ void test_placeholder() {
     
     // Basic tensor test
     std::vector<size_t> shape = {1};
-    turboinfer::core::TensorShape tensor_shape(shape);
-    turboinfer::core::Tensor tensor(tensor_shape);
+    turboinfer::core::Tensor tensor(shape);
     ASSERT_TRUE(tensor.shape().total_size() == 1);
     
     std::cout << "✅ Basic functionality test passed" << std::endl;
