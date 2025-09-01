@@ -114,6 +114,39 @@ public:
      */
     size_t total_memory_usage() const;
 
+    /**
+     * @brief Gets a formatted summary of the model.
+     * @return String containing model summary information.
+     */
+    std::string get_model_summary() const;
+
+    /**
+     * @brief Validates the model for consistency and completeness.
+     * @return True if model is valid, false otherwise.
+     */
+    bool validate() const;
+
+    /**
+     * @brief Gets the estimated model size in a human-readable format.
+     * @return String representing model size (e.g., "7.3 GB").
+     */
+    std::string get_memory_usage_string() const;
+
+    /**
+     * @brief Sets additional configuration parameter.
+     * @param key Parameter name.
+     * @param value Parameter value.
+     */
+    void set_config_param(const std::string& key, const std::string& value);
+
+    /**
+     * @brief Gets configuration parameter value.
+     * @param key Parameter name.
+     * @param default_value Default value if parameter doesn't exist.
+     * @return Parameter value or default value.
+     */
+    std::string get_config_param(const std::string& key, const std::string& default_value = "") const;
+
 private:
     ModelMetadata metadata_;                                    ///< Model metadata
     std::unordered_map<std::string, core::Tensor> tensors_;    ///< Model tensors

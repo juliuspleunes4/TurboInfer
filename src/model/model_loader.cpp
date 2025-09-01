@@ -13,6 +13,7 @@
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <cstdio>
 
 // GGUF format constants and structures
 namespace {
@@ -214,6 +215,335 @@ size_t ModelData::total_memory_usage() const {
     }
     return total;
 }
+
+std::string ModelData::get_model_summary() const {
+    std::string summary;
+    summary += "Model Summary:\n";
+    summary += "  Name: " + metadata_.name + "\n";
+    summary += "  Architecture: " + metadata_.architecture + "\n";
+    summary += "  Version: " + metadata_.version + "\n";
+    summary += "  Vocabulary Size: " + std::to_string(metadata_.vocab_size) + "\n";
+    summary += "  Hidden Size: " + std::to_string(metadata_.hidden_size) + "\n";
+    summary += "  Layers: " + std::to_string(metadata_.num_layers) + "\n";
+    summary += "  Attention Heads: " + std::to_string(metadata_.num_heads) + "\n";
+    summary += "  Intermediate Size: " + std::to_string(metadata_.intermediate_size) + "\n";
+    summary += "  RoPE Theta: " + std::to_string(metadata_.rope_theta) + "\n";
+    summary += "  Number of Tensors: " + std::to_string(num_tensors()) + "\n";
+    summary += "  Memory Usage: " + get_memory_usage_string() + "\n";
+    
+    if (!metadata_.extra_params.empty()) {
+        summary += "  Extra Parameters:\n";
+        for (const auto& param : metadata_.extra_params) {
+            summary += "    " + param.first + ": " + param.second + "\n";
+        }
+    }
+    
+    return summary;
+}
+
+bool ModelData::validate() const {
+    // Check if model has essential metadata
+    if (metadata_.name.empty()) return false;
+    if (metadata_.architecture.empty()) return false;
+    
+    // Check if model has any tensors
+    if (tensors_.empty()) return false;
+    
+    // Check tensor consistency
+    for (const auto& [name, tensor] : tensors_) {
+        const auto& shape = tensor.shape();
+        if (shape.dimensions().empty()) return false;
+        
+        // Check for zero dimensions
+        for (size_t dim : shape.dimensions()) {
+            if (dim == 0) return false;
+        }
+    }
+    
+    // Check for reasonable metadata values
+    if (metadata_.vocab_size > 0 && metadata_.vocab_size > 1000000) {
+        return false; // Vocab size too large
+    }
+    
+    if (metadata_.hidden_size > 0 && metadata_.hidden_size > 32768) {
+        return false; // Hidden size too large
+    }
+    
+    return true;
+}
+
+std::string ModelData::get_memory_usage_string() const {
+    size_t bytes = total_memory_usage();
+    
+    if (bytes == 0) return "0 B";
+    
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int unit_index = 0;
+    double size = static_cast<double>(bytes);
+    
+    while (size >= 1024.0 && unit_index < 4) {
+        size /= 1024.0;
+        unit_index++;
+    }
+    
+    char buffer[32];
+    if (unit_index == 0) {
+        snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit_index]);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.1f %s", size, units[unit_index]);
+    }
+    
+    return std::string(buffer);
+}
+
+void ModelData::set_config_param(const std::string& key, const std::string& value) {
+    metadata_.extra_params[key] = value;
+}
+
+std::string ModelData::get_config_param(const std::string& key, const std::string& default_value) const {
+    auto it = metadata_.extra_params.find(key);
+    if (it != metadata_.extra_params.end()) {
+        return it->second;
+    }
+    return default_value;
+}
+
+// SafeTensors helper functions
+namespace {
+    /**
+     * @struct SafeTensorInfo
+     * @brief Information about a tensor in SafeTensors format.
+     */
+    struct SafeTensorInfo {
+        std::string dtype;
+        std::vector<size_t> shape;
+        std::vector<size_t> data_offsets; // [start, end]
+    };
+    
+    /**
+     * @brief Converts SafeTensors data type string to TurboInfer DataType.
+     * @param dtype SafeTensors dtype string (e.g., "F32", "I32", "U8").
+     * @return Corresponding TurboInfer DataType.
+     */
+    core::DataType convert_safetensors_dtype(const std::string& dtype) {
+        if (dtype == "F32") return core::DataType::kFloat32;
+        if (dtype == "F16") return core::DataType::kFloat32; // Convert F16 to F32 for now
+        if (dtype == "I32") return core::DataType::kInt32;
+        if (dtype == "I8")  return core::DataType::kInt32;  // Convert I8 to I32
+        if (dtype == "U8")  return core::DataType::kInt32;  // Convert U8 to I32
+        if (dtype == "BOOL") return core::DataType::kInt32; // Convert BOOL to I32
+        
+        throw std::runtime_error("Unsupported SafeTensors dtype: " + dtype);
+    }
+    
+    /**
+     * @brief Simple JSON parser for SafeTensors format.
+     * @param json_str JSON string to parse.
+     * @return Map of tensor name to tensor information.
+     */
+    std::unordered_map<std::string, SafeTensorInfo> parse_safetensors_json(const std::string& json_str) {
+        std::unordered_map<std::string, SafeTensorInfo> result;
+        
+        // Find the start and end of the JSON object
+        size_t start = json_str.find('{');
+        size_t end = json_str.rfind('}');
+        
+        if (start == std::string::npos || end == std::string::npos) {
+            throw std::runtime_error("Invalid JSON in SafeTensors header");
+        }
+        
+        // Simple state machine to parse JSON
+        size_t pos = start + 1;
+        
+        while (pos < end) {
+            // Skip whitespace
+            while (pos < end && std::isspace(json_str[pos])) pos++;
+            if (pos >= end) break;
+            
+            // Parse tensor name (key)
+            if (json_str[pos] != '"') {
+                throw std::runtime_error("Expected quote for tensor name in SafeTensors JSON");
+            }
+            pos++; // Skip opening quote
+            
+            size_t name_start = pos;
+            while (pos < end && json_str[pos] != '"') pos++;
+            if (pos >= end) {
+                throw std::runtime_error("Unterminated tensor name in SafeTensors JSON");
+            }
+            
+            std::string tensor_name = json_str.substr(name_start, pos - name_start);
+            pos++; // Skip closing quote
+            
+            // Skip whitespace and colon
+            while (pos < end && std::isspace(json_str[pos])) pos++;
+            if (pos >= end || json_str[pos] != ':') {
+                throw std::runtime_error("Expected colon after tensor name in SafeTensors JSON");
+            }
+            pos++; // Skip colon
+            
+            // Skip whitespace
+            while (pos < end && std::isspace(json_str[pos])) pos++;
+            
+            // Parse tensor info object
+            if (json_str[pos] != '{') {
+                throw std::runtime_error("Expected object for tensor info in SafeTensors JSON");
+            }
+            pos++; // Skip opening brace
+            
+            SafeTensorInfo info;
+            
+            // Parse tensor object properties
+            while (pos < end && json_str[pos] != '}') {
+                // Skip whitespace
+                while (pos < end && std::isspace(json_str[pos])) pos++;
+                if (pos >= end || json_str[pos] == '}') break;
+                
+                // Parse property name
+                if (json_str[pos] != '"') {
+                    throw std::runtime_error("Expected quote for property name in SafeTensors JSON");
+                }
+                pos++; // Skip opening quote
+                
+                size_t prop_start = pos;
+                while (pos < end && json_str[pos] != '"') pos++;
+                if (pos >= end) {
+                    throw std::runtime_error("Unterminated property name in SafeTensors JSON");
+                }
+                
+                std::string prop_name = json_str.substr(prop_start, pos - prop_start);
+                pos++; // Skip closing quote
+                
+                // Skip whitespace and colon
+                while (pos < end && std::isspace(json_str[pos])) pos++;
+                if (pos >= end || json_str[pos] != ':') {
+                    throw std::runtime_error("Expected colon after property name in SafeTensors JSON");
+                }
+                pos++; // Skip colon
+                
+                // Skip whitespace
+                while (pos < end && std::isspace(json_str[pos])) pos++;
+                
+                // Parse property value based on property name
+                if (prop_name == "dtype") {
+                    // Parse string value
+                    if (json_str[pos] != '"') {
+                        throw std::runtime_error("Expected string for dtype in SafeTensors JSON");
+                    }
+                    pos++; // Skip opening quote
+                    
+                    size_t dtype_start = pos;
+                    while (pos < end && json_str[pos] != '"') pos++;
+                    if (pos >= end) {
+                        throw std::runtime_error("Unterminated dtype string in SafeTensors JSON");
+                    }
+                    
+                    info.dtype = json_str.substr(dtype_start, pos - dtype_start);
+                    pos++; // Skip closing quote
+                    
+                } else if (prop_name == "shape") {
+                    // Parse array of numbers
+                    if (json_str[pos] != '[') {
+                        throw std::runtime_error("Expected array for shape in SafeTensors JSON");
+                    }
+                    pos++; // Skip opening bracket
+                    
+                    while (pos < end && json_str[pos] != ']') {
+                        // Skip whitespace
+                        while (pos < end && std::isspace(json_str[pos])) pos++;
+                        if (pos >= end || json_str[pos] == ']') break;
+                        
+                        // Parse number
+                        size_t num_start = pos;
+                        while (pos < end && std::isdigit(json_str[pos])) pos++;
+                        
+                        if (pos == num_start) {
+                            throw std::runtime_error("Expected number in shape array in SafeTensors JSON");
+                        }
+                        
+                        size_t dim = std::stoull(json_str.substr(num_start, pos - num_start));
+                        info.shape.push_back(dim);
+                        
+                        // Skip whitespace
+                        while (pos < end && std::isspace(json_str[pos])) pos++;
+                        
+                        // Skip comma if present
+                        if (pos < end && json_str[pos] == ',') {
+                            pos++;
+                        }
+                    }
+                    
+                    if (pos >= end || json_str[pos] != ']') {
+                        throw std::runtime_error("Expected closing bracket for shape array in SafeTensors JSON");
+                    }
+                    pos++; // Skip closing bracket
+                    
+                } else if (prop_name == "data_offsets") {
+                    // Parse array of two numbers [start, end]
+                    if (json_str[pos] != '[') {
+                        throw std::runtime_error("Expected array for data_offsets in SafeTensors JSON");
+                    }
+                    pos++; // Skip opening bracket
+                    
+                    for (int i = 0; i < 2; i++) {
+                        // Skip whitespace
+                        while (pos < end && std::isspace(json_str[pos])) pos++;
+                        
+                        // Parse number
+                        size_t num_start = pos;
+                        while (pos < end && std::isdigit(json_str[pos])) pos++;
+                        
+                        if (pos == num_start) {
+                            throw std::runtime_error("Expected number in data_offsets array in SafeTensors JSON");
+                        }
+                        
+                        size_t offset = std::stoull(json_str.substr(num_start, pos - num_start));
+                        info.data_offsets.push_back(offset);
+                        
+                        // Skip whitespace
+                        while (pos < end && std::isspace(json_str[pos])) pos++;
+                        
+                        // Skip comma if present and not last element
+                        if (i == 0 && pos < end && json_str[pos] == ',') {
+                            pos++;
+                        }
+                    }
+                    
+                    if (pos >= end || json_str[pos] != ']') {
+                        throw std::runtime_error("Expected closing bracket for data_offsets array in SafeTensors JSON");
+                    }
+                    pos++; // Skip closing bracket
+                }
+                
+                // Skip whitespace
+                while (pos < end && std::isspace(json_str[pos])) pos++;
+                
+                // Skip comma if present
+                if (pos < end && json_str[pos] == ',') {
+                    pos++;
+                }
+            }
+            
+            if (pos >= end || json_str[pos] != '}') {
+                throw std::runtime_error("Expected closing brace for tensor info in SafeTensors JSON");
+            }
+            pos++; // Skip closing brace
+            
+            // Add tensor info to result
+            result[tensor_name] = info;
+            
+            // Skip whitespace
+            while (pos < end && std::isspace(json_str[pos])) pos++;
+            
+            // Skip comma if present
+            if (pos < end && json_str[pos] == ',') {
+                pos++;
+            }
+        }
+        
+        return result;
+    }
+} // namespace
 
 // ModelLoader implementation
 
@@ -555,6 +885,11 @@ ModelData ModelLoader::load_safetensors(const std::string& file_path) {
         throw std::runtime_error("Failed to read SafeTensors header size");
     }
     
+    // Validate header size is reasonable (not too large)
+    if (header_size > 100 * 1024 * 1024) { // 100MB max header size
+        throw std::runtime_error("SafeTensors header size too large: " + std::to_string(header_size));
+    }
+    
     // Read the JSON header
     std::vector<char> header_buffer(header_size);
     file.read(header_buffer.data(), header_size);
@@ -564,43 +899,193 @@ ModelData ModelLoader::load_safetensors(const std::string& file_path) {
     
     std::string header_json(header_buffer.begin(), header_buffer.end());
     
-    // Basic JSON parsing for SafeTensors format
-    // SafeTensors uses a simple JSON structure: {"tensor_name": {"dtype": "F32", "shape": [dim1, dim2, ...], "data_offsets": [start, end]}, ...}
+    // Parse SafeTensors JSON format
+    // Format: {"tensor_name": {"dtype": "F32", "shape": [dim1, dim2, ...], "data_offsets": [start, end]}, "__metadata__": {...}}
     
-    // For now, we'll implement a simple parser that handles the basic structure
-    // This is a minimal implementation - a full JSON parser would be more robust
+    size_t tensor_data_offset = 8 + header_size; // Start of tensor data
     
-    size_t current_offset = 8 + header_size; // Start of tensor data
+    // Simple JSON parser for SafeTensors format
+    auto tensor_info = parse_safetensors_json(header_json);
     
-    // Parse tensor information from JSON (simplified implementation)
-    // In a production system, you'd want to use a proper JSON library like nlohmann/json
-    
-    // For demonstration, let's create a placeholder tensor
-    // In the actual implementation, you would parse the JSON to extract:
-    // - tensor names, shapes, data types, and offsets
-    
-    // Example: Create a simple tensor for testing
-    std::vector<size_t> dims = {1, 1}; // Placeholder dimensions
-    core::TensorShape tensor_shape(dims);
-    core::Tensor placeholder_tensor(tensor_shape, core::DataType::kFloat32);
-    model_data.add_tensor("placeholder", std::move(placeholder_tensor));
-    
-    // TODO: Implement full JSON parsing and tensor data reading
-    // This would involve:
-    // 1. Parsing the JSON header to extract tensor metadata
-    // 2. For each tensor, reading the binary data from the specified offsets
-    // 3. Creating TurboInfer tensors with the correct data
+    // Load each tensor
+    for (const auto& [tensor_name, info] : tensor_info) {
+        if (tensor_name == "__metadata__") {
+            continue; // Skip metadata for now
+        }
+        
+        // Convert SafeTensors dtype to TurboInfer DataType
+        core::DataType data_type = convert_safetensors_dtype(info.dtype);
+        
+        // Create tensor shape
+        core::TensorShape tensor_shape(info.shape);
+        
+        // Create tensor
+        core::Tensor tensor(tensor_shape, data_type);
+        
+        // Read tensor data from file
+        size_t data_size = info.data_offsets[1] - info.data_offsets[0];
+        size_t expected_size = tensor.byte_size();
+        
+        if (data_size != expected_size) {
+            throw std::runtime_error("SafeTensors tensor '" + tensor_name + "' size mismatch. Expected: " + 
+                                   std::to_string(expected_size) + ", Got: " + std::to_string(data_size));
+        }
+        
+        // Seek to tensor data position
+        file.seekg(tensor_data_offset + info.data_offsets[0]);
+        file.read(reinterpret_cast<char*>(tensor.data()), data_size);
+        
+        if (!file.good()) {
+            throw std::runtime_error("Failed to read tensor data for: " + tensor_name);
+        }
+        
+        // Add tensor to model
+        model_data.add_tensor(tensor_name, std::move(tensor));
+    }
     
     file.close();
     return model_data;
 }
 
 ModelData ModelLoader::load_pytorch(const std::string& file_path) {
-    throw std::runtime_error("PyTorch loader not yet implemented");
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open PyTorch file: " + file_path);
+    }
+    
+    ModelData model_data;
+    
+    // PyTorch files are typically pickled Python objects with a specific structure
+    // For a complete implementation, we would need to parse the pickle format
+    // However, this requires understanding Python's pickle protocol
+    
+    // Check for PyTorch magic number (ZIP format signature)
+    char magic[4];
+    file.read(magic, 4);
+    if (!file.good()) {
+        throw std::runtime_error("Failed to read PyTorch file header");
+    }
+    
+    // PyTorch files are typically ZIP archives (torch.save creates ZIP files)
+    bool is_zip = (magic[0] == 'P' && magic[1] == 'K' && magic[2] == 0x03 && magic[3] == 0x04);
+    
+    if (!is_zip) {
+        // Try old pickle format
+        file.seekg(0);
+        
+        // Read first few bytes to check for pickle protocol
+        uint8_t pickle_header[8];
+        file.read(reinterpret_cast<char*>(pickle_header), 8);
+        
+        // Check for pickle protocol markers
+        if (pickle_header[0] != 0x80) { // Pickle protocol 2+ starts with 0x80
+            throw std::runtime_error("Unsupported PyTorch file format - not a valid pickle or ZIP file");
+        }
+        
+        // For now, we'll create a minimal implementation that extracts basic information
+        // A complete implementation would require a full pickle parser
+        
+        // Create placeholder metadata
+        auto& metadata = model_data.metadata();
+        metadata.name = "pytorch_model";
+        metadata.architecture = "unknown";
+        metadata.version = "unknown";
+        metadata.vocab_size = 0;
+        metadata.hidden_size = 0;
+        metadata.num_layers = 0;
+        metadata.num_heads = 0;
+        metadata.intermediate_size = 0;
+        metadata.rope_theta = 10000.0f;
+        
+        throw std::runtime_error("PyTorch pickle format parsing not fully implemented yet. "
+                                "Use GGUF or SafeTensors format for full support.");
+    }
+    
+    // For ZIP-based PyTorch files, we would need to:
+    // 1. Extract the ZIP archive
+    // 2. Read data.pkl (contains the actual tensors)
+    // 3. Parse the pickle format to extract tensor data
+    // 4. Convert PyTorch tensor formats to TurboInfer tensors
+    
+    // This is a complex task that requires implementing a pickle parser
+    // For now, provide a basic structure and error message
+    
+    auto& metadata = model_data.metadata();
+    metadata.name = "pytorch_model";
+    metadata.architecture = "unknown";
+    metadata.version = "unknown";
+    metadata.vocab_size = 0;
+    metadata.hidden_size = 0;
+    metadata.num_layers = 0;
+    metadata.num_heads = 0;
+    metadata.intermediate_size = 0;
+    metadata.rope_theta = 10000.0f;
+    
+    file.close();
+    
+    throw std::runtime_error("PyTorch format parsing not fully implemented yet. "
+                            "PyTorch files require complex pickle format parsing. "
+                            "Please convert your model to GGUF or SafeTensors format using "
+                            "appropriate conversion tools for full support.");
 }
 
 ModelData ModelLoader::load_onnx(const std::string& file_path) {
-    throw std::runtime_error("ONNX loader not yet implemented");
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open ONNX file: " + file_path);
+    }
+    
+    ModelData model_data;
+    
+    // ONNX files use Protocol Buffers (protobuf) format
+    // The file starts with a protobuf message containing the model graph
+    
+    // Read first few bytes to validate ONNX format
+    char header[16];
+    file.read(header, 16);
+    if (!file.good()) {
+        throw std::runtime_error("Failed to read ONNX file header");
+    }
+    
+    // ONNX files typically start with protobuf wire format
+    // We can check for some basic protobuf patterns
+    file.seekg(0);
+    
+    // Read file size
+    file.seekg(0, std::ios::end);
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    if (file_size < 16) {
+        throw std::runtime_error("ONNX file too small to be valid");
+    }
+    
+    // For a complete ONNX implementation, we would need to:
+    // 1. Parse the protobuf format (requires protobuf library or custom parser)
+    // 2. Extract the model graph structure
+    // 3. Read tensor data from the initializers
+    // 4. Convert ONNX tensor formats to TurboInfer tensors
+    // 5. Extract model metadata (input/output shapes, etc.)
+    
+    // Create basic metadata structure
+    auto& metadata = model_data.metadata();
+    metadata.name = "onnx_model";
+    metadata.architecture = "unknown";
+    metadata.version = "unknown";
+    metadata.vocab_size = 0;
+    metadata.hidden_size = 0;
+    metadata.num_layers = 0;
+    metadata.num_heads = 0;
+    metadata.intermediate_size = 0;
+    metadata.rope_theta = 10000.0f;
+    
+    file.close();
+    
+    throw std::runtime_error("ONNX format parsing not fully implemented yet. "
+                            "ONNX files require protobuf parsing which needs additional dependencies. "
+                            "Please convert your model to GGUF or SafeTensors format using "
+                            "appropriate conversion tools for full support. "
+                            "Consider using onnx2torch or similar tools to convert to a supported format.");
 }
 
 bool ModelLoader::validate_model(const ModelData& model_data, const ModelMetadata& metadata) {
