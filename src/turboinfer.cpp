@@ -6,13 +6,21 @@
 
 #include "turboinfer/turboinfer.hpp"
 #include "turboinfer/util/logging.hpp"
+#include "turboinfer/model/inference_engine.hpp"
 #include <chrono>
 #include <sstream>
+#include <unordered_map>
+#include <memory>
+#include <mutex>
 
 namespace turboinfer {
 
 namespace {
     bool g_initialized = false;
+    
+    // Global tokenizer cache to avoid creating new engines for each call
+    std::unordered_map<std::string, std::shared_ptr<model::InferenceEngine>> g_tokenizer_cache;
+    std::mutex g_tokenizer_cache_mutex;
 }
 
 const char* build_info() {
@@ -90,9 +98,14 @@ void shutdown() {
     TURBOINFER_LOG_INFO() << "Shutting down TurboInfer";
     
     // Clean up global systems
-    // - Thread pools
-    // - Memory pools
-    // - Cache systems
+    {
+        std::lock_guard<std::mutex> lock(g_tokenizer_cache_mutex);
+        size_t cached_tokenizers = g_tokenizer_cache.size();
+        g_tokenizer_cache.clear();
+        if (cached_tokenizers > 0) {
+            TURBOINFER_LOG_INFO() << "Cleared " << cached_tokenizers << " cached tokenizers";
+        }
+    }
     
     // Flush logging
     util::Logger::instance().flush();
@@ -104,18 +117,56 @@ bool is_initialized() {
     return g_initialized;
 }
 
+/**
+ * @brief Gets or creates a cached tokenizer for the given model path.
+ * @param model_path Path to the model file.
+ * @return Shared pointer to the inference engine (used as tokenizer).
+ */
+std::shared_ptr<model::InferenceEngine> get_cached_tokenizer(const std::string& model_path) {
+    std::lock_guard<std::mutex> lock(g_tokenizer_cache_mutex);
+    
+    auto it = g_tokenizer_cache.find(model_path);
+    if (it != g_tokenizer_cache.end()) {
+        return it->second;
+    }
+    
+    // Create new tokenizer and cache it
+    try {
+        auto tokenizer = std::make_shared<model::InferenceEngine>(model_path);
+        g_tokenizer_cache[model_path] = tokenizer;
+        return tokenizer;
+    } catch (const std::exception& e) {
+        TURBOINFER_LOG_ERROR() << "Failed to create tokenizer for " << model_path << ": " << e.what();
+        throw;
+    }
+}
+
 std::vector<int> tokenize(const std::string& text, const std::string& model_path) {
-    // Placeholder implementation
-    // In a real implementation, this would load the model's tokenizer
-    model::InferenceEngine engine(model_path);
-    return engine.encode(text);
+    if (!g_initialized) {
+        TURBOINFER_LOG_WARNING() << "TurboInfer not initialized, call turboinfer::initialize() first";
+    }
+    
+    try {
+        auto tokenizer = get_cached_tokenizer(model_path);
+        return tokenizer->encode(text);
+    } catch (const std::exception& e) {
+        TURBOINFER_LOG_ERROR() << "Tokenization failed: " << e.what();
+        return {}; // Return empty vector on error
+    }
 }
 
 std::string detokenize(const std::vector<int>& tokens, const std::string& model_path) {
-    // Placeholder implementation
-    // In a real implementation, this would load the model's tokenizer
-    model::InferenceEngine engine(model_path);
-    return engine.decode(tokens);
+    if (!g_initialized) {
+        TURBOINFER_LOG_WARNING() << "TurboInfer not initialized, call turboinfer::initialize() first";
+    }
+    
+    try {
+        auto tokenizer = get_cached_tokenizer(model_path);
+        return tokenizer->decode(tokens);
+    } catch (const std::exception& e) {
+        TURBOINFER_LOG_ERROR() << "Detokenization failed: " << e.what();
+        return ""; // Return empty string on error
+    }
 }
 
 } // namespace turboinfer

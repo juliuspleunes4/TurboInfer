@@ -5,6 +5,7 @@
  */
 
 #include "turboinfer/model/inference_engine.hpp"
+#include "turboinfer/util/logging.hpp"
 #include <stdexcept>
 #include <random>
 #include <algorithm>
@@ -780,9 +781,69 @@ std::vector<GenerationResult> InferenceEngine::generate_beam_search(
 std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tokens) {
     validate_input_tokens(tokens);
     
-    // Placeholder implementation
-    std::vector<float> logprobs(tokens.size(), -1.0f);
-    return logprobs;
+    if (tokens.empty()) {
+        return {};
+    }
+    
+    try {
+        // Perform forward pass to get logits
+        core::Tensor logits = forward_pass(tokens);
+        
+        // logits shape should be [1, seq_len, vocab_size]
+        const auto& shape = logits.shape();
+        if (shape.ndim() != 3 || shape.size(0) != 1) {
+            TURBOINFER_LOG_WARNING() << "Unexpected logits shape for logprobs computation";
+            return std::vector<float>(tokens.size(), -10.0f); // Return reasonable default
+        }
+        
+        size_t seq_len = shape.size(1);
+        size_t vocab_size = shape.size(2);
+        
+        if (seq_len != tokens.size()) {
+            TURBOINFER_LOG_WARNING() << "Sequence length mismatch in logprobs computation";
+            return std::vector<float>(tokens.size(), -10.0f);
+        }
+        
+        std::vector<float> logprobs;
+        logprobs.reserve(tokens.size());
+        
+        const float* logits_data = logits.data_ptr<float>();
+        
+        // Compute log probabilities for each position
+        for (size_t pos = 0; pos < seq_len; ++pos) {
+            const float* pos_logits = logits_data + pos * vocab_size;
+            
+            // Find maximum for numerical stability
+            float max_logit = pos_logits[0];
+            for (size_t v = 1; v < vocab_size; ++v) {
+                max_logit = std::max(max_logit, pos_logits[v]);
+            }
+            
+            // Compute softmax denominator (sum of exp(logit - max_logit))
+            float sum_exp = 0.0f;
+            for (size_t v = 0; v < vocab_size; ++v) {
+                sum_exp += std::exp(pos_logits[v] - max_logit);
+            }
+            
+            // Get the token ID for this position
+            int token_id = tokens[pos];
+            if (token_id < 0 || static_cast<size_t>(token_id) >= vocab_size) {
+                TURBOINFER_LOG_WARNING() << "Token ID " << token_id << " out of vocab range";
+                logprobs.push_back(-20.0f); // Very low probability for invalid tokens
+                continue;
+            }
+            
+            // Compute log probability: log(softmax(logit)) = logit - max_logit - log(sum_exp)
+            float logprob = pos_logits[token_id] - max_logit - std::log(sum_exp);
+            logprobs.push_back(logprob);
+        }
+        
+        return logprobs;
+        
+    } catch (const std::exception& e) {
+        TURBOINFER_LOG_ERROR() << "Failed to compute logprobs: " << e.what();
+        return std::vector<float>(tokens.size(), -15.0f); // Return reasonable default on error
+    }
 }
 
 std::vector<int> InferenceEngine::encode(const std::string& text) {
@@ -844,7 +905,28 @@ std::string InferenceEngine::decode(const std::vector<int>& tokens) {
 }
 
 void InferenceEngine::reset_state() {
-    // Placeholder implementation
+    if (!impl_) {
+        return; // Nothing to reset if not initialized
+    }
+    
+    // 1. Clear KV-cache
+    impl_->kv_cache_.reset();
+    
+    // 2. Reset performance statistics
+    impl_->total_generations_ = 0;
+    impl_->total_tokens_generated_ = 0;
+    impl_->total_generation_time_ms_ = 0.0f;
+    impl_->total_forward_time_ms_ = 0.0f;
+    impl_->total_forward_passes_ = 0;
+    impl_->average_tokens_per_second_ = 0.0f;
+    impl_->peak_tokens_per_second_ = 0.0f;
+    impl_->cache_hits_ = 0;
+    impl_->cache_misses_ = 0;
+    
+    // 3. Re-seed random number generator
+    impl_->rng_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
+    
+    TURBOINFER_LOG_DEBUG() << "Inference engine state reset completed";
 }
 
 size_t InferenceEngine::memory_usage() const {
