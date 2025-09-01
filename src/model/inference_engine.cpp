@@ -621,8 +621,30 @@ public:
             }
         }
         
-        // 2. Simple transformer processing (placeholder for now)
+        // 2. Transformer processing through all layers
         core::Tensor hidden_states = embeddings;
+        
+        // Create position IDs for RoPE (Rotary Position Embedding)
+        core::TensorShape pos_shape({seq_len});
+        core::Tensor position_ids(pos_shape, core::DataType::kInt32);
+        int* pos_data = position_ids.data_ptr<int>();
+        for (size_t i = 0; i < seq_len; ++i) {
+            pos_data[i] = static_cast<int>(i);
+        }
+        
+        // Create tensor engine for operations
+        core::TensorEngine engine(core::ComputeDevice::kCPU);
+        
+        // Process through all transformer layers
+        for (size_t layer_idx = 0; layer_idx < layers_.size(); ++layer_idx) {
+            hidden_states = layers_[layer_idx].forward(
+                engine, hidden_states, kv_cache_, layer_idx, position_ids);
+        }
+        
+        // Apply final layer normalization if available
+        if (output_norm_) {
+            hidden_states = engine.rms_norm(hidden_states, *output_norm_);
+        }
         
         // 3. Language modeling head projection
         size_t vocab_size = model_data_.metadata().vocab_size > 0 ? model_data_.metadata().vocab_size : 32000;
