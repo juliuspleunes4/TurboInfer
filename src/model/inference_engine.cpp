@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 namespace turboinfer {
 namespace model {
@@ -65,34 +67,105 @@ struct KVCache {
     }
     
     /**
-     * @brief Update cache with new key-value pairs.
+     * @brief Update cache with new key-value pairs using incremental updates.
+     * @param layer_idx Layer index.
+     * @param new_keys New key tensor for current token(s).
+     * @param new_values New value tensor for current token(s).
+     * @return Pair of (full_keys, full_values) including cached and new tokens.
+     */
+    std::pair<core::Tensor, core::Tensor> update_incremental(size_t layer_idx, 
+                                                             const core::Tensor& new_keys, 
+                                                             const core::Tensor& new_values) {
+        if (layer_idx >= key_cache.size()) {
+            throw std::runtime_error("Layer index out of bounds for KV cache");
+        }
+        
+        auto& k_cache = key_cache[layer_idx];
+        auto& v_cache = value_cache[layer_idx];
+        
+        // Get cache dimensions: [batch_size, num_heads, max_seq_len, head_dim]
+        const auto& cache_shape = k_cache.shape();
+        size_t batch_size = cache_shape.size(0);
+        size_t num_heads = cache_shape.size(1);
+        size_t max_seq_len = cache_shape.size(2);
+        size_t head_dim = cache_shape.size(3);
+        
+        // Get new token dimensions: [batch_size, num_heads, new_tokens, head_dim]
+        const auto& new_shape = new_keys.shape();
+        size_t new_tokens = new_shape.size(2);
+        
+        // Check if we have space in cache
+        if (current_length + new_tokens > max_seq_len) {
+            throw std::runtime_error("KV cache overflow: sequence too long");
+        }
+        
+        // Copy new keys/values into cache at current position
+        float* k_cache_ptr = k_cache.data_ptr<float>();
+        float* v_cache_ptr = v_cache.data_ptr<float>();
+        const float* new_k_ptr = new_keys.data_ptr<float>();
+        const float* new_v_ptr = new_values.data_ptr<float>();
+        
+        // Calculate offset for insertion position
+        size_t offset = current_length * head_dim;
+        size_t layer_stride = num_heads * max_seq_len * head_dim;
+        size_t head_stride = max_seq_len * head_dim;
+        size_t new_layer_stride = num_heads * new_tokens * head_dim;
+        size_t new_head_stride = new_tokens * head_dim;
+        
+        // Copy for each batch and head
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t h = 0; h < num_heads; ++h) {
+                // Calculate pointers for this batch/head
+                float* k_dst = k_cache_ptr + b * layer_stride + h * head_stride + offset;
+                float* v_dst = v_cache_ptr + b * layer_stride + h * head_stride + offset;
+                const float* k_src = new_k_ptr + b * new_layer_stride + h * new_head_stride;
+                const float* v_src = new_v_ptr + b * new_layer_stride + h * new_head_stride;
+                
+                // Copy new tokens into cache
+                std::copy(k_src, k_src + new_tokens * head_dim, k_dst);
+                std::copy(v_src, v_src + new_tokens * head_dim, v_dst);
+            }
+        }
+        
+        // Update current length
+        current_length += new_tokens;
+        
+        // Return sliced cache up to current length for attention computation
+        // Shape: [batch_size, num_heads, current_length, head_dim]
+        core::TensorShape result_shape({batch_size, num_heads, current_length, head_dim});
+        core::Tensor full_keys(result_shape, core::DataType::kFloat32);
+        core::Tensor full_values(result_shape, core::DataType::kFloat32);
+        
+        // Copy current cache contents
+        float* result_k_ptr = full_keys.data_ptr<float>();
+        float* result_v_ptr = full_values.data_ptr<float>();
+        size_t result_layer_stride = num_heads * current_length * head_dim;
+        size_t result_head_stride = current_length * head_dim;
+        
+        for (size_t b = 0; b < batch_size; ++b) {
+            for (size_t h = 0; h < num_heads; ++h) {
+                const float* cache_k_src = k_cache_ptr + b * layer_stride + h * head_stride;
+                const float* cache_v_src = v_cache_ptr + b * layer_stride + h * head_stride;
+                float* result_k_dst = result_k_ptr + b * result_layer_stride + h * result_head_stride;
+                float* result_v_dst = result_v_ptr + b * result_layer_stride + h * result_head_stride;
+                
+                std::copy(cache_k_src, cache_k_src + current_length * head_dim, result_k_dst);
+                std::copy(cache_v_src, cache_v_src + current_length * head_dim, result_v_dst);
+            }
+        }
+        
+        return {std::move(full_keys), std::move(full_values)};
+    }
+    
+    /**
+     * @brief Legacy update method (maintained for compatibility).
      * @param layer_idx Layer index.
      * @param new_keys New key tensor.
      * @param new_values New value tensor.
      */
     void update(size_t layer_idx, const core::Tensor& new_keys, const core::Tensor& new_values) {
-        if (layer_idx >= key_cache.size()) {
-            throw std::runtime_error("Layer index out of bounds for KV cache");
-        }
-        
-        // Copy new keys and values into cache at current position
-        // This is a simplified implementation - in practice would need proper tensor slicing
-        auto& k_cache = key_cache[layer_idx];
-        auto& v_cache = value_cache[layer_idx];
-        
-        // For now, just replace the entire cache (simplified)
-        // TODO: Implement proper incremental cache updates
-        if (new_keys.shape().total_size() <= k_cache.shape().total_size()) {
-            std::copy(new_keys.data_ptr<float>(), 
-                     new_keys.data_ptr<float>() + new_keys.shape().total_size(),
-                     k_cache.data_ptr<float>());
-        }
-        
-        if (new_values.shape().total_size() <= v_cache.shape().total_size()) {
-            std::copy(new_values.data_ptr<float>(), 
-                     new_values.data_ptr<float>() + new_values.shape().total_size(),
-                     v_cache.data_ptr<float>());
-        }
+        // Use the new incremental method
+        update_incremental(layer_idx, new_keys, new_values);
     }
 };
 
@@ -127,18 +200,172 @@ struct TransformerLayer {
      */
     core::Tensor forward(core::TensorEngine& engine, const core::Tensor& input,
                         KVCache& kv_cache, size_t layer_idx, const core::Tensor& position_ids) {
-        // For now, just return the input (placeholder implementation)
-        // In a real implementation, this would perform the full transformer layer computation
+        // Store input for residual connection
+        core::Tensor residual = input;
         
-        // 1. Pre-attention normalization
+        // 1. Pre-attention normalization (RMSNorm)
         core::Tensor norm_input = input;
         if (attention_norm) {
             norm_input = engine.rms_norm(input, *attention_norm);
         }
         
-        // Simplified: just return input with some basic operations for now
-        // This is a placeholder - full transformer layer implementation would be much more complex
-        return norm_input;
+        // 2. Multi-head self-attention
+        core::Tensor attn_output = compute_attention(engine, norm_input, kv_cache, layer_idx, position_ids);
+        
+        // 3. First residual connection
+        core::Tensor post_attn = engine.add(residual, attn_output);
+        
+        // 4. Pre-FFN normalization (RMSNorm)
+        core::Tensor ffn_input = post_attn;
+        if (ffn_norm) {
+            ffn_input = engine.rms_norm(post_attn, *ffn_norm);
+        }
+        
+        // 5. Feed-forward network with SwiGLU activation
+        core::Tensor ffn_output = compute_ffn(engine, ffn_input);
+        
+        // 6. Second residual connection
+        core::Tensor output = engine.add(post_attn, ffn_output);
+        
+        return output;
+    }
+    
+private:
+    /**
+     * @brief Compute multi-head self-attention.
+     * @param engine Tensor engine for operations.
+     * @param input Input tensor [seq_len, hidden_size].
+     * @param kv_cache KV cache for this layer.
+     * @param layer_idx Layer index.
+     * @param position_ids Position IDs for RoPE.
+     * @return Attention output tensor.
+     */
+    core::Tensor compute_attention(core::TensorEngine& engine, const core::Tensor& input,
+                                 KVCache& kv_cache, size_t layer_idx, const core::Tensor& position_ids) {
+        if (!q_proj || !k_proj || !v_proj || !o_proj) {
+            // If attention weights are not available, return input (fallback)
+            return input;
+        }
+        
+        // Project to Q, K, V using matmul (linear transformation)
+        core::Tensor q = engine.matmul(input, *q_proj);  // [seq_len, hidden_size]
+        core::Tensor k = engine.matmul(input, *k_proj);
+        core::Tensor v = engine.matmul(input, *v_proj);
+        
+        // Reshape for multi-head attention
+        // For simplicity, assume single head for now (can be extended)
+        size_t seq_len = input.shape().size(0);
+        size_t hidden_size = input.shape().size(1);
+        
+        // Apply RoPE (Rotary Position Embedding) if position_ids provided
+        if (position_ids.shape().total_size() > 0) {
+            q = apply_rope(engine, q, position_ids);
+            k = apply_rope(engine, k, position_ids);
+        }
+        
+        // Update KV cache incrementally and get full cached keys/values
+        if (layer_idx < kv_cache.key_cache.size()) {
+            auto cached_kv = kv_cache.update_incremental(layer_idx, k, v);
+            // Use cached K,V which includes previous tokens + current token
+            k = std::move(cached_kv.first);
+            v = std::move(cached_kv.second);
+        }
+        
+        // Compute attention scores: Q @ K^T
+        core::Tensor k_transposed = engine.transpose(k);
+        core::Tensor scores = engine.matmul(q, k_transposed);
+        
+        // Scale by sqrt(d_k)
+        float scale_factor = 1.0f / std::sqrt(static_cast<float>(hidden_size));
+        core::Tensor scaled_scores = engine.scale(scores, scale_factor);
+        
+        // Apply causal mask (for autoregressive generation)
+        core::Tensor masked_scores = apply_causal_mask(engine, scaled_scores);
+        
+        // Softmax
+        core::Tensor attn_weights = engine.softmax(masked_scores);
+        
+        // Apply attention to values: Attention @ V
+        core::Tensor attn_output = engine.matmul(attn_weights, v);
+        
+        // Output projection
+        core::Tensor output = engine.matmul(attn_output, *o_proj);
+        
+        return output;
+    }
+    
+    /**
+     * @brief Compute feed-forward network with SwiGLU activation.
+     * @param engine Tensor engine for operations.
+     * @param input Input tensor.
+     * @return FFN output tensor.
+     */
+    core::Tensor compute_ffn(core::TensorEngine& engine, const core::Tensor& input) {
+        if (!ffn_up || !ffn_down) {
+            // If FFN weights are not available, return input (fallback)
+            return input;
+        }
+        
+        // Up projection (linear transformation)
+        core::Tensor up_output = engine.matmul(input, *ffn_up);
+        
+        // SwiGLU activation: x * swish(gate(x))
+        core::Tensor activated = up_output; // Initialize with up_output
+        if (ffn_gate) {
+            // Full SwiGLU with separate gate projection
+            core::Tensor gate_output = engine.matmul(input, *ffn_gate);
+            core::Tensor swish_gate = engine.silu(gate_output); // Use silu instead of swish
+            activated = engine.multiply(up_output, swish_gate);
+        } else {
+            // Simplified: just apply ReLU activation
+            activated = engine.relu(up_output);
+        }
+        
+        // Down projection
+        core::Tensor output = engine.matmul(activated, *ffn_down);
+        
+        return output;
+    }
+    
+    /**
+     * @brief Apply RoPE (Rotary Position Embedding).
+     * @param engine Tensor engine.
+     * @param input Input tensor.
+     * @param position_ids Position IDs.
+     * @return Tensor with RoPE applied.
+     */
+    core::Tensor apply_rope(core::TensorEngine& engine, const core::Tensor& input, const core::Tensor& position_ids) {
+        // Simplified RoPE implementation
+        // In practice, this would involve complex trigonometric operations
+        // For now, return input unchanged (can be enhanced later)
+        (void)engine;
+        (void)position_ids;
+        return input;
+    }
+    
+    /**
+     * @brief Apply causal mask to attention scores.
+     * @param engine Tensor engine.
+     * @param scores Attention scores.
+     * @return Masked scores.
+     */
+    core::Tensor apply_causal_mask(core::TensorEngine& engine, const core::Tensor& scores) {
+        // Apply causal mask to prevent attending to future tokens
+        size_t seq_len = scores.shape().size(0);
+        
+        // Create a copy of scores for masking
+        core::Tensor masked_scores = scores;
+        float* data = masked_scores.data_ptr<float>();
+        
+        // Apply mask: set upper triangular part to -inf
+        for (size_t i = 0; i < seq_len; ++i) {
+            for (size_t j = i + 1; j < seq_len; ++j) {
+                size_t idx = i * seq_len + j;
+                data[idx] = -std::numeric_limits<float>::infinity();
+            }
+        }
+        
+        return masked_scores;
     }
 };
 
@@ -152,6 +379,17 @@ public:
     std::unique_ptr<core::Tensor> lm_head_;            ///< Language modeling head weights
     KVCache kv_cache_;                        ///< Key-value cache
     std::mt19937 rng_;                        ///< Random number generator for sampling
+    
+    // Performance tracking
+    mutable size_t total_generations_ = 0;    ///< Total number of generations performed
+    mutable size_t total_tokens_generated_ = 0; ///< Total tokens generated
+    mutable float total_generation_time_ms_ = 0.0f; ///< Total time spent in generation
+    mutable float total_forward_time_ms_ = 0.0f;    ///< Total time spent in forward passes
+    mutable size_t total_forward_passes_ = 0;       ///< Total number of forward passes
+    mutable float average_tokens_per_second_ = 0.0f; ///< Running average of tokens/second
+    mutable float peak_tokens_per_second_ = 0.0f;    ///< Peak tokens/second achieved
+    mutable size_t cache_hits_ = 0;                  ///< KV-cache efficiency hits
+    mutable size_t cache_misses_ = 0;                ///< KV-cache efficiency misses
     
     /**
      * @brief Default constructor.
@@ -211,6 +449,11 @@ public:
      * @return Logits tensor for next token prediction.
      */
     std::unique_ptr<core::Tensor> forward_pass(const std::vector<int>& tokens) {
+        auto forward_start = std::chrono::high_resolution_clock::now();
+        
+        // Track forward pass count
+        total_forward_passes_++;
+        
         // This is a simplified implementation for demonstration
         // In a real implementation, this would involve:
         // 1. Token embedding lookup
@@ -230,6 +473,10 @@ public:
         for (size_t i = 0; i < vocab_size; ++i) {
             data_ptr[i] = dist(rng_);
         }
+        
+        auto forward_end = std::chrono::high_resolution_clock::now();
+        auto forward_duration = std::chrono::duration_cast<std::chrono::milliseconds>(forward_end - forward_start);
+        total_forward_time_ms_ += static_cast<float>(forward_duration.count());
         
         return logits;
     }
@@ -324,6 +571,19 @@ GenerationResult InferenceEngine::generate(const std::vector<int>& input_tokens,
     result.total_time_ms = static_cast<float>(duration.count());
     size_t generated_tokens = result.tokens.size() - input_tokens.size();
     result.tokens_per_second = generated_tokens / (result.total_time_ms / 1000.0f);
+    
+    // Update performance statistics
+    impl_->total_generations_++;
+    impl_->total_tokens_generated_ += generated_tokens;
+    impl_->total_generation_time_ms_ += result.total_time_ms;
+    
+    // Update average tokens/second
+    impl_->average_tokens_per_second_ = impl_->total_tokens_generated_ / (impl_->total_generation_time_ms_ / 1000.0f);
+    
+    // Track peak performance
+    if (result.tokens_per_second > impl_->peak_tokens_per_second_) {
+        impl_->peak_tokens_per_second_ = result.tokens_per_second;
+    }
     
     if (!result.finished) {
         result.stop_reason = "max_new_tokens";
@@ -472,12 +732,186 @@ void InferenceEngine::reset_state() {
 }
 
 size_t InferenceEngine::memory_usage() const {
-    // Placeholder implementation
-    return 1024 * 1024 * 100; // 100 MB
+    if (!impl_) {
+        return 0; // No memory used if not initialized
+    }
+    
+    size_t total_memory = 0;
+    
+    // 1. Model tensor weights (use the built-in method)
+    const ModelData& model_data = impl_->model_data_;
+    total_memory += model_data.total_memory_usage();
+    
+    // 2. KV-cache memory
+    for (const auto& key_tensor : impl_->kv_cache_.key_cache) {
+        total_memory += calculate_tensor_memory(key_tensor);
+    }
+    for (const auto& value_tensor : impl_->kv_cache_.value_cache) {
+        total_memory += calculate_tensor_memory(value_tensor);
+    }
+    
+    // 3. Transformer layer internal tensors (if cached)
+    if (impl_->token_embeddings_) {
+        total_memory += calculate_tensor_memory(*impl_->token_embeddings_);
+    }
+    if (impl_->output_norm_) {
+        total_memory += calculate_tensor_memory(*impl_->output_norm_);
+    }
+    if (impl_->lm_head_) {
+        total_memory += calculate_tensor_memory(*impl_->lm_head_);
+    }
+    
+    // 4. Layer-specific weights (attention and FFN weights)
+    for (const auto& layer : impl_->layers_) {
+        if (layer.q_proj) total_memory += calculate_tensor_memory(*layer.q_proj);
+        if (layer.k_proj) total_memory += calculate_tensor_memory(*layer.k_proj);
+        if (layer.v_proj) total_memory += calculate_tensor_memory(*layer.v_proj);
+        if (layer.o_proj) total_memory += calculate_tensor_memory(*layer.o_proj);
+        if (layer.ffn_gate) total_memory += calculate_tensor_memory(*layer.ffn_gate);
+        if (layer.ffn_up) total_memory += calculate_tensor_memory(*layer.ffn_up);
+        if (layer.ffn_down) total_memory += calculate_tensor_memory(*layer.ffn_down);
+        if (layer.attention_norm) total_memory += calculate_tensor_memory(*layer.attention_norm);
+        if (layer.ffn_norm) total_memory += calculate_tensor_memory(*layer.ffn_norm);
+    }
+    
+    // 5. Additional overhead (approximate)
+    // - Object instances, metadata, etc.
+    size_t overhead = sizeof(InferenceEngineImpl) + 
+                     sizeof(*this) + 
+                     impl_->layers_.size() * sizeof(TransformerLayer) +
+                     1024 * 1024; // 1MB estimated overhead for other allocations
+    
+    total_memory += overhead;
+    
+    return total_memory;
+}
+
+/**
+ * @brief Calculate memory usage of a single tensor.
+ * @param tensor The tensor to calculate memory for.
+ * @return Memory usage in bytes.
+ */
+size_t InferenceEngine::calculate_tensor_memory(const core::Tensor& tensor) const {
+    size_t element_count = tensor.shape().total_size();
+    size_t element_size = 0;
+    
+    // Calculate bytes per element based on data type
+    switch (tensor.dtype()) {
+        case core::DataType::kFloat32:
+            element_size = 4; // 32 bits = 4 bytes
+            break;
+        case core::DataType::kFloat16:
+            element_size = 2; // 16 bits = 2 bytes
+            break;
+        case core::DataType::kInt32:
+            element_size = 4; // 32 bits = 4 bytes
+            break;
+        case core::DataType::kInt16:
+            element_size = 2; // 16 bits = 2 bytes
+            break;
+        case core::DataType::kInt8:
+        case core::DataType::kUInt8:
+            element_size = 1; // 8 bits = 1 byte
+            break;
+        default:
+            element_size = 4; // Default to 4 bytes if unknown
+            break;
+    }
+    
+    return element_count * element_size;
 }
 
 std::string InferenceEngine::performance_stats() const {
-    return "Placeholder performance statistics";
+    if (!impl_) {
+        return "Performance statistics unavailable (engine not initialized)";
+    }
+    
+    std::ostringstream stats;
+    stats << std::fixed << std::setprecision(2);
+    
+    stats << "=== TurboInfer Performance Statistics ===\n";
+    
+    // Generation Statistics
+    stats << "\n📊 Generation Performance:\n";
+    stats << "  Total Generations: " << impl_->total_generations_ << "\n";
+    stats << "  Total Tokens Generated: " << impl_->total_tokens_generated_ << "\n";
+    stats << "  Total Generation Time: " << impl_->total_generation_time_ms_ << " ms\n";
+    
+    if (impl_->total_generations_ > 0) {
+        float avg_tokens_per_gen = static_cast<float>(impl_->total_tokens_generated_) / impl_->total_generations_;
+        float avg_time_per_gen = impl_->total_generation_time_ms_ / impl_->total_generations_;
+        stats << "  Average Tokens/Generation: " << avg_tokens_per_gen << "\n";
+        stats << "  Average Time/Generation: " << avg_time_per_gen << " ms\n";
+    }
+    
+    // Throughput Statistics
+    stats << "\n🚀 Throughput Performance:\n";
+    if (impl_->total_generation_time_ms_ > 0) {
+        stats << "  Average Speed: " << impl_->average_tokens_per_second_ << " tokens/second\n";
+    } else {
+        stats << "  Average Speed: N/A (no generations yet)\n";
+    }
+    stats << "  Peak Speed: " << impl_->peak_tokens_per_second_ << " tokens/second\n";
+    
+    // Forward Pass Statistics
+    stats << "\n⚡ Forward Pass Performance:\n";
+    stats << "  Total Forward Passes: " << impl_->total_forward_passes_ << "\n";
+    stats << "  Total Forward Time: " << impl_->total_forward_time_ms_ << " ms\n";
+    
+    if (impl_->total_forward_passes_ > 0) {
+        float avg_forward_time = impl_->total_forward_time_ms_ / impl_->total_forward_passes_;
+        stats << "  Average Forward Pass Time: " << avg_forward_time << " ms\n";
+        stats << "  Forward Passes/Second: " << (1000.0f / avg_forward_time) << "\n";
+    }
+    
+    // Cache Performance
+    stats << "\n💾 KV-Cache Performance:\n";
+    size_t cache_length = impl_->kv_cache_.current_length;
+    size_t cache_capacity = impl_->kv_cache_.max_length;
+    float cache_utilization = cache_capacity > 0 ? (static_cast<float>(cache_length) / cache_capacity * 100.0f) : 0.0f;
+    
+    stats << "  Current Cache Length: " << cache_length << " tokens\n";
+    stats << "  Cache Capacity: " << cache_capacity << " tokens\n";
+    stats << "  Cache Utilization: " << cache_utilization << "%\n";
+    
+    // Model Information
+    stats << "\n🧠 Model Information:\n";
+    stats << "  Architecture: " << model_metadata_.architecture << "\n";
+    stats << "  Layers: " << model_metadata_.num_layers << "\n";
+    stats << "  Hidden Size: " << model_metadata_.hidden_size << "\n";
+    stats << "  Attention Heads: " << model_metadata_.num_heads << "\n";
+    stats << "  Vocabulary Size: " << model_metadata_.vocab_size << "\n";
+    
+    // Efficiency Metrics
+    stats << "\n📈 Efficiency Metrics:\n";
+    if (impl_->total_tokens_generated_ > 0 && impl_->total_generation_time_ms_ > 0) {
+        float efficiency_score = impl_->average_tokens_per_second_ / 1000.0f; // Normalized score
+        std::string efficiency_rating;
+        if (efficiency_score > 1.0f) efficiency_rating = "Excellent";
+        else if (efficiency_score > 0.5f) efficiency_rating = "Good";
+        else if (efficiency_score > 0.2f) efficiency_rating = "Fair";
+        else efficiency_rating = "Needs Optimization";
+        
+        stats << "  Efficiency Score: " << efficiency_score << "\n";
+        stats << "  Performance Rating: " << efficiency_rating << "\n";
+    } else {
+        stats << "  Efficiency Score: N/A (insufficient data)\n";
+        stats << "  Performance Rating: N/A\n";
+    }
+    
+    // Memory Usage Estimate
+    stats << "\n🔢 Resource Usage:\n";
+    size_t model_size_mb = static_cast<size_t>(memory_usage() / (1024 * 1024));
+    stats << "  Estimated Memory Usage: " << model_size_mb << " MB\n";
+    
+    if (impl_->total_forward_passes_ > 0) {
+        float compute_intensity = static_cast<float>(impl_->total_tokens_generated_) / impl_->total_forward_passes_;
+        stats << "  Compute Intensity: " << compute_intensity << " tokens/forward_pass\n";
+    }
+    
+    stats << "\n=== End Performance Statistics ===";
+    
+    return stats.str();
 }
 
 // Enhanced tokenization helper functions implementation

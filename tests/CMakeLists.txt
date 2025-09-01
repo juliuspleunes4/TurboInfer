@@ -23,6 +23,10 @@ set(TEST_SOURCES
     test_new_tensor_ops.cpp
     test_quantization_persistence.cpp
     test_enhanced_tokenization.cpp
+    test_enhanced_transformer.cpp
+    test_kv_cache_incremental.cpp
+    test_performance_stats.cpp
+    test_incomplete_features_complete.cpp
 )
 
 # Create individual test executables (manual testing approach)

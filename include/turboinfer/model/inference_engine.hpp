@@ -232,6 +232,13 @@ private:
     void validate_batch_size(size_t batch_size) const;
 
     /**
+     * @brief Calculate memory usage of a single tensor.
+     * @param tensor The tensor to calculate memory for.
+     * @return Memory usage in bytes.
+     */
+    size_t calculate_tensor_memory(const core::Tensor& tensor) const;
+
+    /**
      * @brief Forward pass through the transformer model.
      * @param tokens Input token sequence.
      * @return Logits tensor for next token prediction.
