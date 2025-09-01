@@ -13,6 +13,7 @@
 #include <string>
 #include <memory>
 #include <cstddef>
+#include <unordered_map>
 
 namespace turboinfer {
 namespace model {
@@ -268,6 +269,39 @@ private:
      * @return Filtered logits.
      */
     core::Tensor apply_top_p(const core::Tensor& logits, float p);
+
+    // Enhanced tokenization helper functions
+    
+    /**
+     * @brief Initialize vocabulary mappings for BPE tokenization.
+     */
+    void initialize_vocabulary();
+    
+    /**
+     * @brief Split text into words for tokenization.
+     * @param text Input text.
+     * @return Vector of words.
+     */
+    std::vector<std::string> split_text_into_words(const std::string& text);
+    
+    /**
+     * @brief Encode a single word using BPE.
+     * @param word Input word.
+     * @return Vector of token IDs.
+     */
+    std::vector<int> encode_word_bpe(const std::string& word);
+    
+    /**
+     * @brief Check if a string is punctuation.
+     * @param str Input string.
+     * @return True if punctuation.
+     */
+    bool is_punctuation(const std::string& str);
+    
+    // Vocabulary mappings
+    std::unordered_map<std::string, int> vocab_map_;     ///< Token to ID mapping
+    std::unordered_map<int, std::string> id_to_token_;   ///< ID to token mapping
+    std::vector<std::pair<std::string, std::string>> bpe_merges_; ///< BPE merge rules
 
     /**
      * @brief Beam search helper structure for maintaining candidate sequences.

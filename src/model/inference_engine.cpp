@@ -410,24 +410,60 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
 }
 
 std::vector<int> InferenceEngine::encode(const std::string& text) {
-    // Placeholder tokenization - just return character codes
-    std::vector<int> tokens;
-    tokens.reserve(text.length());
-    for (char c : text) {
-        tokens.push_back(static_cast<int>(c));
+    if (vocab_map_.empty()) {
+        initialize_vocabulary();
     }
+    
+    std::vector<int> tokens;
+    
+    // Split text into words (simplified - in practice you'd handle punctuation better)
+    std::vector<std::string> words = split_text_into_words(text);
+    
+    for (const auto& word : words) {
+        auto word_tokens = encode_word_bpe(word);
+        tokens.insert(tokens.end(), word_tokens.begin(), word_tokens.end());
+    }
+    
     return tokens;
 }
 
 std::string InferenceEngine::decode(const std::vector<int>& tokens) {
-    // Placeholder detokenization - just convert back to characters
+    if (id_to_token_.empty()) {
+        initialize_vocabulary();
+    }
+    
     std::string text;
-    text.reserve(tokens.size());
-    for (int token : tokens) {
-        if (token >= 0 && token <= 255) {
-            text.push_back(static_cast<char>(token));
+    
+    for (int token_id : tokens) {
+        auto it = id_to_token_.find(token_id);
+        if (it != id_to_token_.end()) {
+            std::string token_str = it->second;
+            
+            // Handle BPE merge symbols and special tokens
+            if (token_str.find("##") == 0) {
+                // Subword continuation (like BERT)
+                text += token_str.substr(2);
+            } else if (token_str == "<unk>") {
+                text += "<?>";
+            } else if (token_str == "<pad>") {
+                // Skip padding tokens
+                continue;
+            } else if (token_str == "<s>" || token_str == "</s>") {
+                // Skip start/end tokens in detokenization
+                continue;
+            } else {
+                // Regular token - add space before if not the first token and not punctuation
+                if (!text.empty() && !is_punctuation(token_str)) {
+                    text += " ";
+                }
+                text += token_str;
+            }
+        } else {
+            // Unknown token ID
+            text += "<unk>";
         }
     }
+    
     return text;
 }
 
@@ -442,6 +478,185 @@ size_t InferenceEngine::memory_usage() const {
 
 std::string InferenceEngine::performance_stats() const {
     return "Placeholder performance statistics";
+}
+
+// Enhanced tokenization helper functions implementation
+
+void InferenceEngine::initialize_vocabulary() {
+    // Initialize a basic BPE-style vocabulary
+    // In practice, this would be loaded from a vocabulary file (vocab.json + merges.txt)
+    
+    vocab_map_.clear();
+    id_to_token_.clear();
+    bpe_merges_.clear();
+    
+    // Special tokens
+    vocab_map_["<unk>"] = 0;
+    vocab_map_["<pad>"] = 1;
+    vocab_map_["<s>"] = 2;
+    vocab_map_["</s>"] = 3;
+    
+    id_to_token_[0] = "<unk>";
+    id_to_token_[1] = "<pad>";
+    id_to_token_[2] = "<s>";
+    id_to_token_[3] = "</s>";
+    
+    int token_id = 4;
+    
+    // Basic character-level tokens (for fallback)
+    for (int i = 0; i < 256; ++i) {
+        std::string char_token = std::string(1, static_cast<char>(i));
+        vocab_map_[char_token] = token_id;
+        id_to_token_[token_id] = char_token;
+        token_id++;
+    }
+    
+    // Common English subwords and tokens (simplified BPE vocab)
+    std::vector<std::string> common_tokens = {
+        // Common subwords
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her", "was", "one",
+        "our", "out", "day", "get", "has", "him", "his", "how", "man", "new", "now", "old", "see",
+        "two", "way", "who", "boy", "did", "its", "let", "put", "say", "she", "too", "use",
+        
+        // Common prefixes and suffixes
+        "ing", "ed", "er", "ly", "un", "re", "in", "dis", "en", "non", "over", "pre", "under",
+        "##ing", "##ed", "##er", "##ly", "##s", "##d", "##t", "##n", "##r", "##l",
+        
+        // Common punctuation as tokens
+        ".", ",", "!", "?", ";", ":", "'", "\"", "(", ")", "-", "_", "/", "\\",
+        
+        // Whitespace
+        " ", "\n", "\t",
+        
+        // Common word pieces
+        "an", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it", "me", "my", "no", "of",
+        "on", "or", "so", "to", "up", "we", "as", "am", "us", "ex", "oh", "ok", "hi",
+        
+        // More complex subwords
+        "tion", "able", "ment", "ness", "less", "ful", "ant", "ent", "ive", "ous", "ish", "est"
+    };
+    
+    for (const auto& token : common_tokens) {
+        vocab_map_[token] = token_id;
+        id_to_token_[token_id] = token;
+        token_id++;
+    }
+    
+    // Add some BPE merge rules (simplified)
+    bpe_merges_ = {
+        {"t", "h"},     // th
+        {"i", "n"},     // in  
+        {"a", "n"},     // an
+        {"e", "r"},     // er
+        {"o", "n"},     // on
+        {"r", "e"},     // re
+        {"th", "e"},    // the
+        {"in", "g"},    // ing
+        {"a", "nd"},    // and
+        {"t", "o"},     // to
+    };
+}
+
+std::vector<std::string> InferenceEngine::split_text_into_words(const std::string& text) {
+    std::vector<std::string> words;
+    std::string current_word;
+    
+    for (size_t i = 0; i < text.length(); ++i) {
+        char c = text[i];
+        
+        if (std::isspace(c)) {
+            if (!current_word.empty()) {
+                words.push_back(current_word);
+                current_word.clear();
+            }
+            // Add whitespace as a separate token
+            words.push_back(std::string(1, c));
+        } else if (std::ispunct(c)) {
+            if (!current_word.empty()) {
+                words.push_back(current_word);
+                current_word.clear();
+            }
+            // Add punctuation as a separate token
+            words.push_back(std::string(1, c));
+        } else {
+            current_word += c;
+        }
+    }
+    
+    if (!current_word.empty()) {
+        words.push_back(current_word);
+    }
+    
+    return words;
+}
+
+std::vector<int> InferenceEngine::encode_word_bpe(const std::string& word) {
+    if (word.empty()) {
+        return {};
+    }
+    
+    // Check if the whole word is in vocabulary
+    auto it = vocab_map_.find(word);
+    if (it != vocab_map_.end()) {
+        return {it->second};
+    }
+    
+    // Try to apply BPE merges
+    std::vector<std::string> word_tokens;
+    
+    // Start with character-level tokenization
+    for (char c : word) {
+        word_tokens.push_back(std::string(1, c));
+    }
+    
+    // Apply BPE merges
+    bool changed = true;
+    while (changed && word_tokens.size() > 1) {
+        changed = false;
+        
+        for (const auto& merge : bpe_merges_) {
+            for (size_t i = 0; i < word_tokens.size() - 1; ++i) {
+                if (word_tokens[i] == merge.first && word_tokens[i + 1] == merge.second) {
+                    std::string merged = merge.first + merge.second;
+                    word_tokens[i] = merged;
+                    word_tokens.erase(word_tokens.begin() + i + 1);
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) break;
+        }
+    }
+    
+    // Convert tokens to IDs
+    std::vector<int> token_ids;
+    for (const auto& token : word_tokens) {
+        auto token_it = vocab_map_.find(token);
+        if (token_it != vocab_map_.end()) {
+            token_ids.push_back(token_it->second);
+        } else {
+            // Fall back to character-level if token not found
+            for (char c : token) {
+                std::string char_token(1, c);
+                auto char_it = vocab_map_.find(char_token);
+                if (char_it != vocab_map_.end()) {
+                    token_ids.push_back(char_it->second);
+                } else {
+                    token_ids.push_back(0); // <unk>
+                }
+            }
+        }
+    }
+    
+    return token_ids;
+}
+
+bool InferenceEngine::is_punctuation(const std::string& str) {
+    if (str.empty()) return false;
+    
+    // Common punctuation characters
+    static const std::string punct = ".,!?;:\"'()[]{}/-_\\";
+    return str.length() == 1 && punct.find(str[0]) != std::string::npos;
 }
 
 void InferenceEngine::initialize(const ModelData& model_data) {

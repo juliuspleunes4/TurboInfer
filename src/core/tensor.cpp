@@ -193,8 +193,54 @@ Tensor Tensor::slice(const std::vector<size_t>& start, const std::vector<size_t>
                 std::memcpy(dst_row, src_row, copy_size);
             }
         } else {
-            throw std::runtime_error("Slice operation not yet implemented for tensors with " + 
-                                   std::to_string(shape_.ndim()) + " dimensions");
+            // Generic multi-dimensional slicing
+            const uint8_t* src = static_cast<const uint8_t*>(data());
+            uint8_t* dst = static_cast<uint8_t*>(result.data());
+            size_t elem_size = element_size();
+            size_t total_elements = new_shape.total_size();
+            
+            // Calculate strides for source tensor
+            std::vector<size_t> src_strides(shape_.ndim());
+            src_strides[shape_.ndim() - 1] = elem_size;
+            for (int i = static_cast<int>(shape_.ndim()) - 2; i >= 0; --i) {
+                src_strides[i] = src_strides[i + 1] * shape_.size(i + 1);
+            }
+            
+            // Calculate strides for destination tensor
+            std::vector<size_t> dst_strides(new_shape.ndim());
+            dst_strides[new_shape.ndim() - 1] = elem_size;
+            for (int i = static_cast<int>(new_shape.ndim()) - 2; i >= 0; --i) {
+                dst_strides[i] = dst_strides[i + 1] * new_shape.size(i + 1);
+            }
+            
+            // Copy elements one by one using coordinate conversion
+            for (size_t dst_idx = 0; dst_idx < total_elements; ++dst_idx) {
+                // Convert linear destination index to multi-dimensional coordinates
+                std::vector<size_t> dst_coords(new_shape.ndim());
+                size_t temp_idx = dst_idx;
+                
+                for (size_t dim = 0; dim < new_shape.ndim(); ++dim) {
+                    size_t stride_elements = dst_strides[dim] / elem_size;
+                    dst_coords[dim] = temp_idx / stride_elements;
+                    temp_idx %= stride_elements;
+                }
+                
+                // Map destination coordinates to source coordinates
+                std::vector<size_t> src_coords(shape_.ndim());
+                for (size_t dim = 0; dim < shape_.ndim(); ++dim) {
+                    src_coords[dim] = start[dim] + dst_coords[dim];
+                }
+                
+                // Convert source coordinates to linear index
+                size_t src_idx = 0;
+                for (size_t dim = 0; dim < shape_.ndim(); ++dim) {
+                    size_t stride_elements = src_strides[dim] / elem_size;
+                    src_idx += src_coords[dim] * stride_elements;
+                }
+                
+                // Copy element
+                std::memcpy(dst + dst_idx * elem_size, src + src_idx * elem_size, elem_size);
+            }
         }
     }
     

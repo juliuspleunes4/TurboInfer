@@ -20,6 +20,9 @@ set(TEST_SOURCES
     test_beam_search.cpp
     test_inference_engine.cpp
     test_phase4_complete.cpp
+    test_new_tensor_ops.cpp
+    test_quantization_persistence.cpp
+    test_enhanced_tokenization.cpp
 )
 
 # Create individual test executables (manual testing approach)

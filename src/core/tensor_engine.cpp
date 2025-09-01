@@ -7,6 +7,7 @@
 #include "turboinfer/core/tensor_engine.hpp"
 #include <stdexcept>
 #include <cmath>
+#include <cstring>
 
 // SIMD intrinsics support
 #ifdef TURBOINFER_SIMD_ENABLED
@@ -1323,19 +1324,446 @@ Tensor TensorEngine::scale(const Tensor& input, float scale) {
 }
 
 Tensor TensorEngine::concatenate(const std::vector<Tensor>& tensors, size_t dim) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (tensors.empty()) {
+        throw std::runtime_error("Cannot concatenate empty list of tensors");
+    }
+    
+    if (tensors.size() == 1) {
+        return tensors[0].clone();
+    }
+    
+    // Validate all tensors have the same shape except for the concatenation dimension
+    const auto& first_shape = tensors[0].shape();
+    DataType dtype = tensors[0].dtype();
+    
+    if (dim >= first_shape.ndim()) {
+        throw std::runtime_error("Concatenation dimension out of bounds");
+    }
+    
+    size_t total_concat_size = 0;
+    for (const auto& tensor : tensors) {
+        if (tensor.empty()) {
+            throw std::runtime_error("Cannot concatenate empty tensors");
+        }
+        
+        if (tensor.dtype() != dtype) {
+            throw std::runtime_error("All tensors must have the same data type for concatenation");
+        }
+        
+        if (tensor.shape().ndim() != first_shape.ndim()) {
+            throw std::runtime_error("All tensors must have the same number of dimensions for concatenation");
+        }
+        
+        // Check that all dimensions match except the concatenation dimension
+        for (size_t i = 0; i < first_shape.ndim(); ++i) {
+            if (i != dim && tensor.shape().size(i) != first_shape.size(i)) {
+                throw std::runtime_error("Tensor dimensions must match except for concatenation dimension");
+            }
+        }
+        
+        total_concat_size += tensor.shape().size(dim);
+    }
+    
+    // Create output shape
+    auto output_dims = first_shape.dimensions();
+    output_dims[dim] = total_concat_size;
+    TensorShape output_shape(output_dims);
+    
+    Tensor result(output_shape, dtype);
+    
+    // Perform concatenation
+    if (dtype == DataType::kFloat32) {
+        float* result_data = result.data_ptr<float>();
+        size_t offset = 0;
+        
+        // Calculate strides
+        size_t outer_size = 1;
+        for (size_t i = 0; i < dim; ++i) {
+            outer_size *= first_shape.size(i);
+        }
+        
+        size_t inner_size = 1;
+        for (size_t i = dim + 1; i < first_shape.ndim(); ++i) {
+            inner_size *= first_shape.size(i);
+        }
+        
+        for (const auto& tensor : tensors) {
+            const float* tensor_data = tensor.data_ptr<float>();
+            size_t tensor_concat_size = tensor.shape().size(dim);
+            size_t tensor_slice_size = tensor_concat_size * inner_size;
+            
+            for (size_t outer = 0; outer < outer_size; ++outer) {
+                size_t src_offset = outer * tensor_slice_size;
+                size_t dst_offset = outer * total_concat_size * inner_size + offset * inner_size;
+                
+                memcpy(result_data + dst_offset, 
+                       tensor_data + src_offset, 
+                       tensor_slice_size * sizeof(float));
+            }
+            
+            offset += tensor_concat_size;
+        }
+    } else if (dtype == DataType::kInt32) {
+        int32_t* result_data = result.data_ptr<int32_t>();
+        size_t offset = 0;
+        
+        size_t outer_size = 1;
+        for (size_t i = 0; i < dim; ++i) {
+            outer_size *= first_shape.size(i);
+        }
+        
+        size_t inner_size = 1;
+        for (size_t i = dim + 1; i < first_shape.ndim(); ++i) {
+            inner_size *= first_shape.size(i);
+        }
+        
+        for (const auto& tensor : tensors) {
+            const int32_t* tensor_data = tensor.data_ptr<int32_t>();
+            size_t tensor_concat_size = tensor.shape().size(dim);
+            size_t tensor_slice_size = tensor_concat_size * inner_size;
+            
+            for (size_t outer = 0; outer < outer_size; ++outer) {
+                size_t src_offset = outer * tensor_slice_size;
+                size_t dst_offset = outer * total_concat_size * inner_size + offset * inner_size;
+                
+                memcpy(result_data + dst_offset, 
+                       tensor_data + src_offset, 
+                       tensor_slice_size * sizeof(int32_t));
+            }
+            
+            offset += tensor_concat_size;
+        }
+    } else {
+        throw std::runtime_error("Concatenation currently only supports Float32 and Int32 data types");
+    }
+    
+    return result;
 }
 
 std::vector<Tensor> TensorEngine::split(const Tensor& input, const std::vector<size_t>& split_sizes, size_t dim) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (input.empty()) {
+        throw std::runtime_error("Cannot split empty tensor");
+    }
+    
+    if (split_sizes.empty()) {
+        throw std::runtime_error("Split sizes cannot be empty");
+    }
+    
+    const auto& shape = input.shape();
+    
+    if (dim >= shape.ndim()) {
+        throw std::runtime_error("Split dimension out of bounds");
+    }
+    
+    // Validate split sizes sum to the dimension size
+    size_t total_split_size = 0;
+    for (size_t size : split_sizes) {
+        if (size == 0) {
+            throw std::runtime_error("Split sizes must be greater than 0");
+        }
+        total_split_size += size;
+    }
+    
+    if (total_split_size != shape.size(dim)) {
+        throw std::runtime_error("Sum of split sizes must equal the dimension size");
+    }
+    
+    std::vector<Tensor> results;
+    results.reserve(split_sizes.size());
+    
+    if (input.dtype() == DataType::kFloat32) {
+        const float* input_data = input.data_ptr<float>();
+        
+        // Calculate strides
+        size_t outer_size = 1;
+        for (size_t i = 0; i < dim; ++i) {
+            outer_size *= shape.size(i);
+        }
+        
+        size_t inner_size = 1;
+        for (size_t i = dim + 1; i < shape.ndim(); ++i) {
+            inner_size *= shape.size(i);
+        }
+        
+        size_t current_offset = 0;
+        
+        for (size_t split_size : split_sizes) {
+            // Create output shape for this split
+            auto output_dims = shape.dimensions();
+            output_dims[dim] = split_size;
+            TensorShape output_shape(output_dims);
+            
+            Tensor split_tensor(output_shape, input.dtype());
+            float* split_data = split_tensor.data_ptr<float>();
+            
+            // Copy data for this split
+            size_t split_slice_size = split_size * inner_size;
+            
+            for (size_t outer = 0; outer < outer_size; ++outer) {
+                size_t src_offset = outer * shape.size(dim) * inner_size + current_offset * inner_size;
+                size_t dst_offset = outer * split_slice_size;
+                
+                memcpy(split_data + dst_offset, 
+                       input_data + src_offset, 
+                       split_slice_size * sizeof(float));
+            }
+            
+            results.push_back(std::move(split_tensor));
+            current_offset += split_size;
+        }
+    } else if (input.dtype() == DataType::kInt32) {
+        const int32_t* input_data = input.data_ptr<int32_t>();
+        
+        size_t outer_size = 1;
+        for (size_t i = 0; i < dim; ++i) {
+            outer_size *= shape.size(i);
+        }
+        
+        size_t inner_size = 1;
+        for (size_t i = dim + 1; i < shape.ndim(); ++i) {
+            inner_size *= shape.size(i);
+        }
+        
+        size_t current_offset = 0;
+        
+        for (size_t split_size : split_sizes) {
+            auto output_dims = shape.dimensions();
+            output_dims[dim] = split_size;
+            TensorShape output_shape(output_dims);
+            
+            Tensor split_tensor(output_shape, input.dtype());
+            int32_t* split_data = split_tensor.data_ptr<int32_t>();
+            
+            size_t split_slice_size = split_size * inner_size;
+            
+            for (size_t outer = 0; outer < outer_size; ++outer) {
+                size_t src_offset = outer * shape.size(dim) * inner_size + current_offset * inner_size;
+                size_t dst_offset = outer * split_slice_size;
+                
+                memcpy(split_data + dst_offset, 
+                       input_data + src_offset, 
+                       split_slice_size * sizeof(int32_t));
+            }
+            
+            results.push_back(std::move(split_tensor));
+            current_offset += split_size;
+        }
+    } else {
+        throw std::runtime_error("Split currently only supports Float32 and Int32 data types");
+    }
+    
+    return results;
 }
 
 Tensor TensorEngine::transpose(const Tensor& input) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (input.empty()) {
+        throw std::runtime_error("Cannot transpose empty tensor");
+    }
+    
+    const auto& shape = input.shape();
+    
+    // Handle different tensor dimensions
+    if (shape.ndim() == 1) {
+        // 1D tensor: transpose is just a copy
+        return input.clone();
+    } else if (shape.ndim() == 2) {
+        // 2D tensor: standard matrix transpose (M x N) -> (N x M)
+        size_t rows = shape.size(0);
+        size_t cols = shape.size(1);
+        
+        TensorShape transposed_shape({cols, rows});
+        Tensor result(transposed_shape, input.dtype());
+        
+        if (input.dtype() == DataType::kFloat32) {
+            const float* input_data = input.data_ptr<float>();
+            float* result_data = result.data_ptr<float>();
+            
+            for (size_t i = 0; i < rows; ++i) {
+                for (size_t j = 0; j < cols; ++j) {
+                    result_data[j * rows + i] = input_data[i * cols + j];
+                }
+            }
+        } else if (input.dtype() == DataType::kInt32) {
+            const int32_t* input_data = input.data_ptr<int32_t>();
+            int32_t* result_data = result.data_ptr<int32_t>();
+            
+            for (size_t i = 0; i < rows; ++i) {
+                for (size_t j = 0; j < cols; ++j) {
+                    result_data[j * rows + i] = input_data[i * cols + j];
+                }
+            }
+        } else if (input.dtype() == DataType::kInt8) {
+            const int8_t* input_data = input.data_ptr<int8_t>();
+            int8_t* result_data = result.data_ptr<int8_t>();
+            
+            for (size_t i = 0; i < rows; ++i) {
+                for (size_t j = 0; j < cols; ++j) {
+                    result_data[j * rows + i] = input_data[i * cols + j];
+                }
+            }
+        } else if (input.dtype() == DataType::kUInt8) {
+            const uint8_t* input_data = input.data_ptr<uint8_t>();
+            uint8_t* result_data = result.data_ptr<uint8_t>();
+            
+            for (size_t i = 0; i < rows; ++i) {
+                for (size_t j = 0; j < cols; ++j) {
+                    result_data[j * rows + i] = input_data[i * cols + j];
+                }
+            }
+        } else {
+            throw std::runtime_error("Transpose not supported for this data type");
+        }
+        
+        return result;
+    } else {
+        // For higher dimensions, transpose swaps the last two dimensions
+        // For example: (B, M, N) -> (B, N, M)
+        auto dims = shape.dimensions();
+        if (dims.size() < 2) {
+            throw std::runtime_error("Cannot transpose tensor with less than 2 dimensions");
+        }
+        
+        // Swap last two dimensions
+        std::swap(dims[dims.size() - 2], dims[dims.size() - 1]);
+        TensorShape transposed_shape(dims);
+        Tensor result(transposed_shape, input.dtype());
+        
+        size_t last_dim = shape.size(shape.ndim() - 1);
+        size_t second_last_dim = shape.size(shape.ndim() - 2);
+        size_t batch_size = shape.total_size() / (last_dim * second_last_dim);
+        
+        if (input.dtype() == DataType::kFloat32) {
+            const float* input_data = input.data_ptr<float>();
+            float* result_data = result.data_ptr<float>();
+            
+            for (size_t batch = 0; batch < batch_size; ++batch) {
+                size_t batch_offset = batch * second_last_dim * last_dim;
+                
+                for (size_t i = 0; i < second_last_dim; ++i) {
+                    for (size_t j = 0; j < last_dim; ++j) {
+                        size_t input_idx = batch_offset + i * last_dim + j;
+                        size_t output_idx = batch_offset + j * second_last_dim + i;
+                        result_data[output_idx] = input_data[input_idx];
+                    }
+                }
+            }
+        } else {
+            throw std::runtime_error("Multi-dimensional transpose currently only supports Float32");
+        }
+        
+        return result;
+    }
 }
 
 Tensor TensorEngine::permute(const Tensor& input, const std::vector<size_t>& dims) {
-    throw std::runtime_error("TensorEngine operations not yet implemented");
+    if (input.empty()) {
+        throw std::runtime_error("Cannot permute empty tensor");
+    }
+    
+    const auto& shape = input.shape();
+    
+    if (dims.size() != shape.ndim()) {
+        throw std::runtime_error("Number of permutation dimensions must match tensor dimensions");
+    }
+    
+    // Validate that dims contains each dimension exactly once
+    std::vector<bool> used(shape.ndim(), false);
+    for (size_t dim : dims) {
+        if (dim >= shape.ndim()) {
+            throw std::runtime_error("Permutation dimension out of bounds");
+        }
+        if (used[dim]) {
+            throw std::runtime_error("Duplicate dimension in permutation");
+        }
+        used[dim] = true;
+    }
+    
+    // Create permuted shape
+    std::vector<size_t> permuted_dims(shape.ndim());
+    for (size_t i = 0; i < dims.size(); ++i) {
+        permuted_dims[i] = shape.size(dims[i]);
+    }
+    TensorShape permuted_shape(permuted_dims);
+    
+    Tensor result(permuted_shape, input.dtype());
+    
+    // Calculate strides for input and output
+    std::vector<size_t> input_strides(shape.ndim());
+    std::vector<size_t> output_strides(shape.ndim());
+    
+    input_strides[shape.ndim() - 1] = 1;
+    for (int i = static_cast<int>(shape.ndim()) - 2; i >= 0; --i) {
+        input_strides[i] = input_strides[i + 1] * shape.size(i + 1);
+    }
+    
+    output_strides[shape.ndim() - 1] = 1;
+    for (int i = static_cast<int>(shape.ndim()) - 2; i >= 0; --i) {
+        output_strides[i] = output_strides[i + 1] * permuted_dims[i + 1];
+    }
+    
+    if (input.dtype() == DataType::kFloat32) {
+        const float* input_data = input.data_ptr<float>();
+        float* result_data = result.data_ptr<float>();
+        
+        // Iterate through all elements in the output tensor
+        size_t total_elements = permuted_shape.total_size();
+        
+        for (size_t output_idx = 0; output_idx < total_elements; ++output_idx) {
+            // Convert linear output index to multi-dimensional coordinates
+            std::vector<size_t> output_coords(shape.ndim());
+            size_t temp_idx = output_idx;
+            
+            for (size_t i = 0; i < shape.ndim(); ++i) {
+                output_coords[i] = temp_idx / output_strides[i];
+                temp_idx %= output_strides[i];
+            }
+            
+            // Map output coordinates to input coordinates using permutation
+            std::vector<size_t> input_coords(shape.ndim());
+            for (size_t i = 0; i < dims.size(); ++i) {
+                input_coords[dims[i]] = output_coords[i];
+            }
+            
+            // Convert input coordinates to linear index
+            size_t input_idx = 0;
+            for (size_t i = 0; i < shape.ndim(); ++i) {
+                input_idx += input_coords[i] * input_strides[i];
+            }
+            
+            result_data[output_idx] = input_data[input_idx];
+        }
+    } else if (input.dtype() == DataType::kInt32) {
+        const int32_t* input_data = input.data_ptr<int32_t>();
+        int32_t* result_data = result.data_ptr<int32_t>();
+        
+        size_t total_elements = permuted_shape.total_size();
+        
+        for (size_t output_idx = 0; output_idx < total_elements; ++output_idx) {
+            std::vector<size_t> output_coords(shape.ndim());
+            size_t temp_idx = output_idx;
+            
+            for (size_t i = 0; i < shape.ndim(); ++i) {
+                output_coords[i] = temp_idx / output_strides[i];
+                temp_idx %= output_strides[i];
+            }
+            
+            std::vector<size_t> input_coords(shape.ndim());
+            for (size_t i = 0; i < dims.size(); ++i) {
+                input_coords[dims[i]] = output_coords[i];
+            }
+            
+            size_t input_idx = 0;
+            for (size_t i = 0; i < shape.ndim(); ++i) {
+                input_idx += input_coords[i] * input_strides[i];
+            }
+            
+            result_data[output_idx] = input_data[input_idx];
+        }
+    } else {
+        throw std::runtime_error("Permute currently only supports Float32 and Int32 data types");
+    }
+    
+    return result;
 }
 
 void TensorEngine::validate_binary_op_compatibility(const Tensor& a, const Tensor& b) const {
