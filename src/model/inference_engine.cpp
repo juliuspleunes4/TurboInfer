@@ -877,6 +877,17 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
         return {};
     }
     
+    // Log probability error constants with semantic meaning
+    // These values represent different severity levels of errors in descending order:
+    // -25.0f: Severe structural errors (wrong tensor shapes, sequence mismatches)
+    // -20.0f: Data validation errors (invalid/out-of-vocab tokens)  
+    // -18.0f: Computation errors (recoverable runtime failures)
+    // The values are chosen to be significantly negative to indicate very low probabilities
+    // while still being distinguishable for debugging purposes.
+    static constexpr float LOGPROB_SHAPE_ERROR = -25.0f;        // Very low: invalid tensor shape
+    static constexpr float LOGPROB_INVALID_TOKEN = -20.0f;      // Very low: out-of-vocab token
+    static constexpr float LOGPROB_COMPUTATION_ERROR = -18.0f;  // Low: general computation failure
+    
     try {
         // Perform forward pass to get logits
         core::Tensor logits = forward_pass(tokens);
@@ -885,7 +896,8 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
         const auto& shape = logits.shape();
         if (shape.ndim() != 3 || shape.size(0) != 1) {
             TURBOINFER_LOG_WARNING() << "Unexpected logits shape for logprobs computation";
-            return std::vector<float>(tokens.size(), -10.0f); // Return reasonable default
+            // Return very low probability indicating shape error
+            return std::vector<float>(tokens.size(), LOGPROB_SHAPE_ERROR);
         }
         
         size_t seq_len = shape.size(1);
@@ -893,7 +905,8 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
         
         if (seq_len != tokens.size()) {
             TURBOINFER_LOG_WARNING() << "Sequence length mismatch in logprobs computation";
-            return std::vector<float>(tokens.size(), -10.0f);
+            // Return very low probability indicating sequence mismatch
+            return std::vector<float>(tokens.size(), LOGPROB_SHAPE_ERROR);
         }
         
         std::vector<float> logprobs;
@@ -921,7 +934,7 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
             int token_id = tokens[pos];
             if (token_id < 0 || static_cast<size_t>(token_id) >= vocab_size) {
                 TURBOINFER_LOG_WARNING() << "Token ID " << token_id << " out of vocab range";
-                logprobs.push_back(-20.0f); // Very low probability for invalid tokens
+                logprobs.push_back(LOGPROB_INVALID_TOKEN); // Very low probability for invalid tokens
                 continue;
             }
             
@@ -934,7 +947,9 @@ std::vector<float> InferenceEngine::compute_logprobs(const std::vector<int>& tok
         
     } catch (const std::exception& e) {
         TURBOINFER_LOG_ERROR() << "Failed to compute logprobs: " << e.what();
-        return std::vector<float>(tokens.size(), -15.0f); // Return reasonable default on error
+        // Return moderate low probability indicating computation error
+        // (less severe than shape/validation errors)
+        return std::vector<float>(tokens.size(), LOGPROB_COMPUTATION_ERROR);
     }
 }
 
