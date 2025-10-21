@@ -1,0 +1,46 @@
+# GitHub Language Detection - Ensure only C++ is recognized
+# Mark documentation files
+*.md linguist-documentation
+*.txt linguist-documentation
+
+# Mark configuration files as configuration
+*.cmake linguist-language=CMake
+CMakeLists.txt linguist-language=CMake
+*.json linguist-data
+*.yml linguist-data
+*.yaml linguist-data
+
+# Mark build artifacts and generated files as vendored (ignored)
+build/ linguist-vendored
+bin/ linguist-vendored
+lib/ linguist-vendored
+*.exe linguist-vendored
+*.dll linguist-vendored
+*.so linguist-vendored
+*.a linguist-vendored
+
+# Mark scripts as shell/powershell but don't count toward language stats
+*.ps1 linguist-documentation
+*.bat linguist-documentation
+*.sh linguist-documentation
+
+# Explicitly identify C++ files (this is usually automatic, but ensures recognition)
+*.cpp linguist-language=C++
+*.cc linguist-language=C++
+*.cxx linguist-language=C++
+*.c++ linguist-language=C++
+*.hpp linguist-language=C++
+*.hh linguist-language=C++
+*.hxx linguist-language=C++
+*.h++ linguist-language=C++
+*.h linguist-language=C++
+
+# Mark any Python files as documentation (if any exist)
+*.py linguist-documentation
+
+# Mark license file as documentation
+LICENSE linguist-documentation
+
+# Mark any other common non-C++ files as documentation
+*.gguf linguist-data
+tools/ linguist-documentation
